@@ -14,6 +14,13 @@ const ProtectedRoute = () => {
 };
 
 export default function App() {
+
+  useEffect(() => {
+    // App එක මුලින්ම load වෙද්දී <html> tag එකෙන් 'dark' class එක අයින් කරනවා.
+    // මේ නිසා මුළු app එකම default විදිහට Light Mode එකෙන් වැඩ කරනවා.
+    document.documentElement.classList.remove('dark');
+  }, []);
+
   return (
     <BrowserRouter>
       <Toaster position="top-center" />
