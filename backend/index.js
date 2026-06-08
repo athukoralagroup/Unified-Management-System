@@ -30,32 +30,35 @@ import rawMaterialInRouter from './Packing/Routes/rawMaterialInRouter.js';
 import restoreTeaStockRouter from './Packing/Routes/restoreTeaStockrouter.js';
 
 dotenv.config();
+
 const app = express();
 
-// =====================================================================
-// *** අතිශය වැදගත් වෙනස (CRITICAL FOR RENDER & VERCEL) ***
-// Render හිදී Secure Cookies යැවීම සඳහා මෙය අනිවාර්ය වේ.
-app.set('trust proxy', 1); 
-// =====================================================================
+// =====================================================
+// 🔥 IMPORTANT FOR RAILWAY / COOKIE AUTH
+// =====================================================
+app.set('trust proxy', 1);
 
-// 2. CORS Configuration එක Cookies සඳහා සකස් කිරීම
-// ඔබගේ Vercel Link එකේ අගට "/" (slash) ලකුණ නොමැති බව තහවුරු කරගන්න.
+// =====================================================
+// 🌍 Allowed Origins (Vercel + Localhost)
+// =====================================================
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:3000',
   'https://unifiedmanagementsystemathukoralagroup.vercel.app'
 ];
 
+// =====================================================
+// 🚀 CORS CONFIG (FIXED)
+// =====================================================
 app.use(cors({
   origin: function (origin, callback) {
-    // allow Postman / mobile apps
     if (!origin) return callback(null, true);
 
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
 
-    // ❗ production safe fallback (DON'T block hard)
+    // debug safe fallback (prevents blocking)
     return callback(null, true);
   },
   credentials: true,
@@ -63,42 +66,43 @@ app.use(cors({
   allowedHeaders: ["Content-Type", "Authorization"]
 }));
 
-app.options("*", cors({
-  origin: allowedOrigins,
-  credentials: true
-}));
+// =====================================================
+// ⚡ PRE-FLIGHT HANDLER (VERY IMPORTANT)
+// =====================================================
+app.options("*", cors());
 
-// Middleware 
+// =====================================================
+// 🔐 SECURITY + PARSERS
+// =====================================================
 app.use(helmet());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(cookieParser()); // 3. Cookie parser Middleware එක භාවිතා කිරීම
+app.use(cookieParser());
 
-// Connect to MongoDB
-mongoose.connect(process.env.MONGO_URL).then(() => {
-    console.log("Connected to MongoDB");
-}).catch((err) => {
-    console.error("MongoDB connection error:", err);
-});
+// =====================================================
+// 🛢️ DATABASE CONNECTION
+// =====================================================
+mongoose.connect(process.env.MONGO_URL)
+  .then(() => console.log("Connected to MongoDB"))
+  .catch((err) => console.error("MongoDB connection error:", err));
 
-// Routes
-// Notice: We removed app.use(authjwt) from here!
-// Security is now handled inside each specific Router file.
-
-app.use('/api/auth', authRouter); // Put Auth first so people can log in!
+// =====================================================
+// 🚀 ROUTES
+// =====================================================
+app.use('/api/auth', authRouter);
 app.use('/api/green-leaf', greenLeafRouter);
 app.use('/api/production', productionRouter);
 app.use('/api/labour', labourRouter);
 app.use('/api/dehydrator', dehydratorRouter);
 app.use('/api/cost-of-production', costOfProductionRouter);
 app.use('/api/raw-material-cost', rawMaterialCostRoutes);
-app.use('/api/users', userRouter); // User management routes (Admins only)
+app.use('/api/users', userRouter);
 app.use('/api/selling-details', sellingDetailsRouter);
 app.use('/api/production-summary', productionSummaryRouter);
 app.use('/api/handmade/transfers', handmadeTransferRouter);
 app.use('/api/loft-leaf', loftLeafCountRoutes);
 
-// Packing Section Routes
+// Packing Section
 app.use('/api/local-sales', localSaleRouter);
 app.use('/api/tea-center-issues', teaCenterIssueRouter);
 app.use('/api/packing/transfers', packingTransferRouter);
@@ -108,8 +112,11 @@ app.use('/api/tea-receivedother', teaTransactionOtherRouter);
 app.use('/api/raw-materials-in', rawMaterialInRouter);
 app.use('/api/restore-tea-stock', restoreTeaStockRouter);
 
-
+// =====================================================
+// 🚀 SERVER START
+// =====================================================
 const PORT = process.env.PORT || 3000;
+
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
