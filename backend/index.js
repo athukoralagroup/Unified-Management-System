@@ -34,7 +34,9 @@ const app = express();
 app.use(cors());
 
 // Middleware 
+app.use(helmet());
 app.use(bodyParser.json());
+app.use(cookieParser());
 
 // Connect to MongoDB
 mongoose.connect(process.env.MONGO_URL).then(() => {
