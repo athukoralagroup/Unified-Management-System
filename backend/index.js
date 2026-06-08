@@ -42,21 +42,27 @@ app.set('trust proxy', 1);
 // 2. CORS Configuration එක Cookies සඳහා සකස් කිරීම
 // ඔබගේ Vercel Link එකේ අගට "/" (slash) ලකුණ නොමැති බව තහවුරු කරගන්න.
 const allowedOrigins = [
-  'http://localhost:5173', 
+  'http://localhost:5173',
   'http://localhost:3000',
-  'https://unifiedmanagementsystemathukoralagroup.vercel.app' 
+  'https://unifiedmanagementsystemathukoralagroup.vercel.app'
 ];
 
 app.use(cors({
-    origin: function (origin, callback) {
-        if (!origin || allowedOrigins.includes(origin)) {
-            callback(null, true);
-        } else {
-            callback(new Error('Not allowed by CORS'));
-        }
-    },
-    credentials: true // Cookies සඳහා මෙය අනිවාර්ය වේ
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    } else {
+      return callback(null, false); // IMPORTANT: no Error throw
+    }
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
 }));
+
+app.options("*", cors());
 
 
 // Middleware 
