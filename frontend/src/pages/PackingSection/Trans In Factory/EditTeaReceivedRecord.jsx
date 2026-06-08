@@ -23,7 +23,7 @@ const TEA_TYPES = [
     "Awurudu Special"
 ];
 
-export default function EditTeaReceivedOutRecord() {
+export default function EditTeaReceivedRecord() {
     const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
     const navigate = useNavigate();
     const location = useLocation();
@@ -192,10 +192,19 @@ export default function EditTeaReceivedOutRecord() {
 
     return (
         <div className="p-8 max-w-[1000px] mx-auto font-sans transition-colors duration-300 min-h-screen border mt-4 border-teal-300 rounded-2xl dark:border-zinc-800">
-            
+            <button 
+                type="button"
+                onClick={() => navigate(-1)}
+                className="p-2.5 bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-zinc-700 rounded-full transition-colors mb-0.5 shrink-0"
+                title="Go Back"
+            >
+                <ArrowLeft size={20} />
+            </button>
+
             <div className="mb-8 flex flex-col items-center ">
+                
                 <h2 className="text-3xl font-bold text-[#0f766e] dark:text-teal-400 flex gap-2">
-                    <FileText size={28} /> Edit Received Tea Record
+                    <FileText size={28} /> Edit Received Tea Record From Factory
                 </h2>
                 <p className="text-gray-500 dark:text-gray-400 mt-2 font-medium">Update previously received tea grades</p>
                 
@@ -238,6 +247,9 @@ export default function EditTeaReceivedOutRecord() {
                                     <FileText size={16} className="text-[#0d9488]"/> Transaction No
                                 </label>
                                 <div className="flex rounded-md shadow-sm">
+                                    <span className="inline-flex items-center px-4 rounded-l-md border border-r-0 border-gray-300 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-800 text-gray-500 dark:text-gray-400 sm:text-sm font-bold">
+                                        HO/TO/
+                                    </span>
                                     <input 
                                         type="text" 
                                         name="transactionNo" 
@@ -251,14 +263,7 @@ export default function EditTeaReceivedOutRecord() {
                             </div>
                         </div>
                         
-                        <button 
-                            type="button"
-                            onClick={() => navigate(-1)}
-                            className="p-2.5 bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-zinc-700 rounded-full transition-colors mb-0.5 shrink-0"
-                            title="Go Back"
-                        >
-                            <ArrowLeft size={20} />
-                        </button>
+                        
                     </div>
 
                     <div className="mb-8 bg-teal-50/50 dark:bg-teal-950/20 border border-teal-200 dark:border-teal-800/50 rounded-lg p-6 transition-colors duration-300">
@@ -266,13 +271,6 @@ export default function EditTeaReceivedOutRecord() {
                             <h3 className="text-lg font-bold text-[#0f766e] dark:text-teal-500 flex items-center gap-2">
                                 <Package size={20} /> Grades Received
                             </h3>
-                            <button 
-                                type="button" 
-                                onClick={handleAddItemRow}
-                                className="text-sm font-bold bg-teal-100 hover:bg-teal-200 dark:bg-teal-900/40 dark:hover:bg-teal-800/60 text-[#0f766e] dark:text-teal-400 px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors"
-                            >
-                                <PlusCircle size={16} /> Add Grade
-                            </button>
                         </div>
 
                         <div className="space-y-6">
@@ -347,6 +345,16 @@ export default function EditTeaReceivedOutRecord() {
                                     </div>
                                 </div>
                             ))}
+
+                            <div className="flex justify-end">
+                                <button 
+                                    type="button" 
+                                    onClick={handleAddItemRow}
+                                    className="text-sm font-bold bg-teal-100 hover:bg-teal-200 dark:bg-teal-900/40 dark:hover:bg-teal-800/60 text-[#0f766e] dark:text-teal-400 px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors"
+                                >
+                                    <PlusCircle size={16} /> Add Grade
+                                </button>
+                            </div>
                         </div>
 
                         <div className="mt-4 flex flex-col sm:flex-row justify-end gap-6 border-t border-teal-200/50 dark:border-teal-800/30 pt-4">

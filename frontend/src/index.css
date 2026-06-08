@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /* ADD THIS LINE FOR DARK MODE TOGGLE */
-@custom-variant dark (&:is(.dark *));
+@variant dark (&:is(.dark *));
 @layer base {
   /* This targets date, month, week, and time inputs when in dark mode */
   .dark input[type="date"]::-webkit-calendar-picker-indicator,
