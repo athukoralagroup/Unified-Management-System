@@ -20,12 +20,13 @@ const calculateLeafStats = (best, belowBest, poor) => {
     };
 };
 
-// 1. GET ALL RECORDS (With Optional Month Filter)
+// 1. GET ALL RECORDS (With Optional Month & SampleType Filter)
 export const getAllLoftLeafCounts = async (req, res) => {
     try {
-        const { month } = req.query; // e.g., '2026-04'
+        const { month, sampleType } = req.query; // e.g., month='2026-04', sampleType='Factory'
         let filter = {};
 
+        // මාසය අනුව filter කිරීම
         if (month) {
             const [yearStr, monthStr] = month.split('-');
             const year = parseInt(yearStr, 10);
@@ -40,6 +41,11 @@ export const getAllLoftLeafCounts = async (req, res) => {
             };
         }
 
+        // sampleType එක අනුව filter කිරීම (Factory හෝ LeafCollector)
+        if (sampleType) {
+            filter.sampleType = sampleType;
+        }
+
         const records = await LoftLeafCount.find(filter).sort({ date: -1 });
         res.status(200).json(records);
     } catch (error) {
@@ -51,10 +57,18 @@ export const getAllLoftLeafCounts = async (req, res) => {
 // 2. CREATE NEW RECORD
 export const createLoftLeafCount = async (req, res) => {
     try {
-        const { date, route, bestQty, belowBestQty, poorQty, updatedBy } = req.body;
+        // අලුතින් totalLeafQty මෙතනට extract කරගෙන ඇත
+        const { date, route, sampleType, officerName, totalLeafQty, bestQty, belowBestQty, poorQty, updatedBy } = req.body;
 
+        // Validation
         if (!date) {
             return res.status(400).json({ message: "Date is required." });
+        }
+        if (!route) {
+            return res.status(400).json({ message: "Route is required." });
+        }
+        if (!sampleType) {
+            return res.status(400).json({ message: "Sample Type (Factory / LeafCollector) is required." });
         }
 
         // Backend Calculation
@@ -63,6 +77,10 @@ export const createLoftLeafCount = async (req, res) => {
         const newRecord = new LoftLeafCount({
             date,
             route,
+            sampleType,
+            officerName: officerName || "",
+            // Factory එකක් නම් පමණක් අගය ගන්නවා, නැතිනම් null කරනවා
+            totalLeafQty: sampleType === 'Factory' && totalLeafQty !== undefined ? Number(totalLeafQty) : null, 
             bestQty: Number(bestQty) || 0,
             belowBestQty: Number(belowBestQty) || 0,
             poorQty: Number(poorQty) || 0,
@@ -85,7 +103,8 @@ export const createLoftLeafCount = async (req, res) => {
 // 3. UPDATE RECORD
 export const updateLoftLeafCount = async (req, res) => {
     try {
-        const { date, bestQty, belowBestQty, poorQty, updatedBy } = req.body;
+        // අලුතින් totalLeafQty මෙතනට extract කරගෙන ඇත
+        const { date, route, sampleType, officerName, totalLeafQty, bestQty, belowBestQty, poorQty, updatedBy } = req.body;
         const record = await LoftLeafCount.findById(req.params.id);
 
         if (!record) {
@@ -94,6 +113,16 @@ export const updateLoftLeafCount = async (req, res) => {
 
         // අලුත් දත්ත update කිරීම
         if (date) record.date = date;
+        if (route) record.route = route;
+        if (sampleType) record.sampleType = sampleType;
+        if (officerName !== undefined) record.officerName = officerName; 
+        
+        // totalLeafQty එක update කිරීම
+        if (totalLeafQty !== undefined) {
+            const currentSampleType = sampleType || record.sampleType;
+            record.totalLeafQty = currentSampleType === 'Factory' && totalLeafQty !== "" ? Number(totalLeafQty) : null;
+        }
+        
         if (bestQty !== undefined) record.bestQty = Number(bestQty);
         if (belowBestQty !== undefined) record.belowBestQty = Number(belowBestQty);
         if (poorQty !== undefined) record.poorQty = Number(poorQty);
@@ -129,5 +158,77 @@ export const deleteLoftLeafCount = async (req, res) => {
     } catch (error) {
         console.error("Delete loft leaf count error:", error);
         res.status(500).json({ message: "Error deleting record." });
+    }
+};
+
+// 5. GET MONTHLY SUMMARY BY ROUTE (WEIGHTED AVERAGES)
+export const getMonthlyRouteSummary = async (req, res) => {
+    try {
+        const { month } = req.query; // Expects format 'YYYY-MM'
+        
+        if (!month) {
+            return res.status(400).json({ message: "Month parameter is required (e.g., 2026-04)." });
+        }
+
+        const [yearStr, monthStr] = month.split('-');
+        const year = parseInt(yearStr, 10);
+        const monthInt = parseInt(monthStr, 10) - 1; 
+
+        const startDate = new Date(year, monthInt, 1);
+        const endDate = new Date(year, monthInt + 1, 0, 23, 59, 59, 999);
+
+        const summary = await LoftLeafCount.aggregate([
+            {
+                // Step 1: Filter records for the requested month
+                $match: {
+                    date: { $gte: startDate, $lte: endDate }
+                }
+            },
+            {
+                // Step 2: Group by Route and calculate sums
+                $group: {
+                    _id: { $toLower: { $arrayElemAt: [{ $split: ["$route", " - "] }, 0] } },
+                    originalRoute: { $first: "$route" },
+                    monthlyTotalQty: { $sum: "$totalQty" },
+                    monthlyBestQty: { $sum: "$bestQty" },
+                    monthlyBelowBestQty: { $sum: "$belowBestQty" },
+                    monthlyPoorQty: { $sum: "$poorQty" }
+                }
+            },
+            {
+                // Step 3: Calculate the exact Weighted Average Percentages
+                $project: {
+                    _id: 0,
+                    route: "$originalRoute",
+                    monthlyTotalQty: 1,
+                    monthlyBestQty: 1,
+                    
+                    // Final Average Best % = (Sum of Best Qty / Sum of Total Qty) * 100
+                    finalBestPercentage: {
+                        $cond: [
+                            { $gt: ["$monthlyTotalQty", 0] },
+                            { $round: [{ $multiply: [{ $divide: ["$monthlyBestQty", "$monthlyTotalQty"] }, 100] }, 2] },
+                            0
+                        ]
+                    },
+                    finalBelowBestPercentage: {
+                        $cond: [
+                            { $gt: ["$monthlyTotalQty", 0] },
+                            { $round: [{ $multiply: [{ $divide: ["$monthlyBelowBestQty", "$monthlyTotalQty"] }, 100] }, 2] },
+                            0
+                        ]
+                    }
+                }
+            },
+            {
+                // Step 4: Sort alphabetically by route
+                $sort: { route: 1 }
+            }
+        ]);
+
+        res.status(200).json(summary);
+    } catch (error) {
+        console.error("Aggregation summary error:", error);
+        res.status(500).json({ message: "Server error calculating weighted average summary." });
     }
 };
