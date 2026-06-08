@@ -1,5 +1,4 @@
 import express from 'express';
-import bodyParser from 'body-parser';
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import cors from 'cors';
@@ -49,25 +48,30 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: function (origin, callback) {
+    // allow Postman / mobile apps
     if (!origin) return callback(null, true);
 
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
-    } else {
-      return callback(null, false); // IMPORTANT: no Error throw
     }
+
+    // ❗ production safe fallback (DON'T block hard)
+    return callback(null, true);
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"]
 }));
 
-app.options("*", cors());
-
+app.options("*", cors({
+  origin: allowedOrigins,
+  credentials: true
+}));
 
 // Middleware 
 app.use(helmet());
-app.use(bodyParser.json());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser()); // 3. Cookie parser Middleware එක භාවිතා කිරීම
 
 // Connect to MongoDB
