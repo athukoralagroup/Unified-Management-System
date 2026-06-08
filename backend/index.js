@@ -51,24 +51,17 @@ const allowedOrigins = [
 // 🚀 CORS CONFIG (FIXED)
 // =====================================================
 app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin) return callback(null, true);
-
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-
-    // debug safe fallback (prevents blocking)
-    return callback(null, true);
-  },
+  origin: [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'https://unifiedmanagementsystemathukoralagroup.vercel.app'
+  ],
   credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
+  methods: ["GET","POST","PUT","DELETE","OPTIONS"],
+  allowedHeaders: ["Content-Type","Authorization"]
 }));
 
-// =====================================================
-// ⚡ PRE-FLIGHT HANDLER (VERY IMPORTANT)
-// =====================================================
+// IMPORTANT: handle preflight properly
 app.options("*", cors());
 
 // =====================================================
