@@ -1,49 +1,32 @@
 import FactoryLog from "../models/FactoryLog.js";
+import PendingTransfer from "../../Packing/models/PendingTransfer.js";
+import TeaReceived from "../../Packing/models/TeaReceivedModel.js"; 
 
-// 1. GET FACTORY LOGS (මාසය අනුව හෝ දින පරාසය අනුව පෙර මාසයේ B/F එකද සමඟ ලබා ගැනීම)
+// 1. GET FACTORY LOGS
 export const getFactoryLogsByMonth = async (req, res) => {
   try {
     const { month, startDate, endDate } = req.query;
-
     let query = {};
-    let beforeDateQuery = null; // B/F ගණනය කිරීම සඳහා පෙර දින සෙවීම
+    let beforeDateQuery = null;
+    let maxRequestedDate = new Date();
 
-    // 1. මාසය පමණක් (Month) තෝරා ඇත්නම්
     if (month) {
       const startOfMonth = new Date(`${month}-01T00:00:00.000Z`);
-      const endOfMonth = new Date(
-        startOfMonth.getFullYear(),
-        startOfMonth.getMonth() + 1,
-        0,
-        23,
-        59,
-        59,
-        999,
-      );
-
+      const endOfMonth = new Date(startOfMonth.getFullYear(), startOfMonth.getMonth() + 1, 0, 23, 59, 59, 999);
       query.date = { $gte: startOfMonth, $lte: endOfMonth };
-      beforeDateQuery = { date: { $lt: startOfMonth } }; // තෝරාගත් මාසයට පෙර සියලු දත්ත
-    }
-    // 2. දින පරාසයක් (Date Range) තෝරා ඇත්නම්
-    else if (startDate && endDate) {
+      beforeDateQuery = { date: { $lt: startOfMonth } };
+      maxRequestedDate = endOfMonth;
+    } else if (startDate && endDate) {
       const start = new Date(`${startDate}T00:00:00.000Z`);
       const end = new Date(`${endDate}T23:59:59.999Z`);
-
       query.date = { $gte: start, $lte: end };
-      beforeDateQuery = { date: { $lt: start } }; // තෝරාගත් දිනට පෙර සියලු දත්ත
+      beforeDateQuery = { date: { $lt: start } };
+      maxRequestedDate = end;
     } else {
-      return res
-        .status(400)
-        .json({
-          message: "Please provide a 'month' or 'startDate' and 'endDate'.",
-        });
+      return res.status(400).json({ message: "Please provide a 'month' or 'startDate' and 'endDate'." });
     }
 
-    // ==========================================
-    // 🌟 B/F Balance එක ගණනය කිරීම (Aggregations මගින්)
-    // ==========================================
     let bfFromLastMonth = 0;
-
     if (beforeDateQuery) {
       const aggrResult = await FactoryLog.aggregate([
         { $match: beforeDateQuery },
@@ -57,41 +40,86 @@ export const getFactoryLogsByMonth = async (req, res) => {
           },
         },
       ]);
-
       if (aggrResult.length > 0) {
-        const { totalMadeTea, totalDispatch, totalLocal, totalReturn } =
-          aggrResult[0];
-
-        // B/F Balance Formula = (Total Made Tea) - (Dispatch + Local Sales) + Returns
-        bfFromLastMonth =
-          totalMadeTea - (totalDispatch + totalLocal) + totalReturn;
+        const { totalMadeTea, totalDispatch, totalLocal, totalReturn } = aggrResult[0];
+        bfFromLastMonth = totalMadeTea - (totalDispatch + totalLocal) + totalReturn;
       }
     }
 
-    // ==========================================
-    // 🌟 අදාල මාසයේ/දින පරාසයේ Records ලබා ගැනීම
-    // ==========================================
-    const records = await FactoryLog.find(query).sort({ date: 1 });
+    const records = await FactoryLog.find(query).sort({ date: 1 }).lean();
 
-    // ගණනය කළ B/F අගය හා අදාළ දත්ත ටික Frontend එකට යැවීම
-    res.status(200).json({ bfFromLastMonth, records });
+    // ========================================================
+    // 3. DAYS TO ZERO (AGE OF STOCK) CALCULATION LOGIC
+    // ========================================================
+    
+    let reqYear = maxRequestedDate.getFullYear();
+    if (maxRequestedDate.getMonth() < 3) {
+        reqYear -= 1; 
+    }
+    const aprilFirstDate = new Date(`${reqYear}-04-01T00:00:00.000Z`);
+
+    const allRecordsSinceApril = await FactoryLog.find({
+        date: { $gte: aprilFirstDate, $lte: maxRequestedDate }
+    }).sort({ date: 1 }).lean();
+
+    let virtualBalance = 0;
+
+    const processedAllRecords = allRecordsSinceApril.map((record, index) => {
+        const mt = record.madeTea?.today || 0;
+        const disp = record.dispatch || 0;
+        const loc = record.localSaleAndGratis || 0;
+        const ret = record.returnAmount || 0;
+        const totalOut = disp + loc;
+
+        virtualBalance = virtualBalance + mt - totalOut + ret;
+        let tempBal = virtualBalance;
+        let days = 0;
+
+        for (let j = index; j >= 0; j--) {
+            if (tempBal <= 0) break;
+            days++;
+            const pastMt = allRecordsSinceApril[j].madeTea?.today || 0;
+            tempBal = tempBal - pastMt; 
+        }
+
+        return {
+            ...record,
+            daysToZero: days
+        };
+    });
+
+    const finalRecords = records.map(record => {
+        const processedMatch = processedAllRecords.find(
+            pr => pr._id.toString() === record._id.toString()
+        );
+        return {
+            ...record,
+            daysToZero: processedMatch ? processedMatch.daysToZero : 0
+        };
+    });
+
+    res.status(200).json({ bfFromLastMonth, records: finalRecords });
   } catch (error) {
     console.error("Error fetching factory logs:", error);
     res.status(500).json({ message: "Server error fetching factory logs." });
   }
 };
 
-// 2. SAVE OR UPDATE DAILY FACTORY LOG (Edit karaddi Username eka show wenne methanadi)
-// 2. SAVE OR UPDATE DAILY FACTORY LOG
+// 2. SAVE OR UPDATE DAILY FACTORY LOG 
+// 2. SAVE OR UPDATE DAILY FACTORY LOG 
 export const saveDailyFactoryLog = async (req, res) => {
   try {
-    const {
-      date,
-      greenLeafToday,
-      dispatch,
-      localSaleAndGratis,
-      returnAmount,
-      username,
+    const { 
+      date, 
+      greenLeafToday, 
+      dispatch, 
+      localSaleAndGratis, 
+      returnAmount, 
+      invoiceNo, 
+      dispatchTeaType, 
+      localSaleTeaType, 
+      username, 
+      isExplicitEdit 
     } = req.body;
 
     if (!date) return res.status(400).json({ message: "Date is required." });
@@ -99,14 +127,19 @@ export const saveDailyFactoryLog = async (req, res) => {
     const targetDate = new Date(date);
     targetDate.setUTCHours(0, 0, 0, 0);
 
+    // 🌟 අලුත්: User ගේ නම අනිවාර්යයෙන්ම ලබා ගැනීම 🌟
+    const currentUser = username || req.user?.username || "Factory Admin";
+
     const glToday = Number(greenLeafToday) || 0;
-    const madeTeaToday = glToday * 0.215;
-    const totalOut =
-      (Number(dispatch) || 0) + (Number(localSaleAndGratis) || 0);
+
+    const selectedMonthNumber = targetDate.getMonth() + 1; 
+    const monthsWith21Percent = [4, 5, 6, 9, 10, 11, 12];
+    const conversionRate = monthsWith21Percent.includes(selectedMonthNumber) ? 0.21 : 0.215;
+    const madeTeaToday = glToday * conversionRate;
+
+    const totalOut = (Number(dispatch) || 0) + (Number(localSaleAndGratis) || 0);
     const retAmount = Number(returnAmount) || 0;
 
-    // 🌟 Backend Validation එක මෙතනින් පටන් ගන්නවා
-    // 1. මේ දවසට කලින් තිබුණු ඔක්කොම Record වල අගයන් එකතු කරලා Previous Balance එක හොයනවා
     const aggrResult = await FactoryLog.aggregate([
       { $match: { date: { $lt: targetDate } } },
       {
@@ -123,61 +156,122 @@ export const saveDailyFactoryLog = async (req, res) => {
     let previousBalance = 0;
     if (aggrResult.length > 0) {
       const r = aggrResult[0];
-      previousBalance =
-        r.totalMadeTea - (r.totalDispatch + r.totalLocal) + r.totalReturn;
+      previousBalance = r.totalMadeTea - (r.totalDispatch + r.totalLocal) + r.totalReturn;
     }
 
-    // 2. මේ දවසේ අගයන් ටිකත් එක්ක අලුත් Balance එක හදනවා
-    const currentBalance =
-      previousBalance + madeTeaToday - totalOut + retAmount;
+    const currentBalance = previousBalance + madeTeaToday - totalOut + retAmount;
 
-    // 3. Balance එක ඍණ වෙනවනම් Save වෙන්න දෙන්නේ නෑ
     if (currentBalance < 0) {
       return res.status(400).json({
         message: `Cannot save record for ${date}. Total Out exceeds the available Factory Balance.`,
       });
     }
-    // 🌟 Validation එක ඉවරයි
 
     const existingRecord = await FactoryLog.findOne({ date: targetDate });
-
+    
     let updateFields = {
       greenLeaf: { today: glToday },
-      madeTea: { today: madeTeaToday },
+      madeTea: { today: Number(madeTeaToday.toFixed(2)) }, 
+      
       dispatch: Number(dispatch) || 0,
+      invoiceNo: invoiceNo || "",              
+      dispatchTeaType: dispatchTeaType || "",  
+      
       localSaleAndGratis: Number(localSaleAndGratis) || 0,
+      localSaleTeaType: localSaleTeaType || "", 
+      
       totalOut: totalOut,
       returnAmount: retAmount,
+      
+      bfBalance: Number(previousBalance.toFixed(2)),
+      factoryBalance: Number(currentBalance.toFixed(2)),
     };
 
     if (existingRecord) {
-      updateFields.isEdited = true;
-      updateFields.lastUpdatedDate = new Date();
-      updateFields.editedBy = username || req.user?.username || "Unknown User";
+      if (isExplicitEdit) {
+        updateFields.isEdited = true;
+        updateFields.lastUpdatedDate = new Date();
+        updateFields.editedBy = currentUser; // 👈 currentUser භාවිතය
+      }
     } else {
       updateFields.isEdited = false;
-      updateFields.editedBy = "";
+      updateFields.editedBy = currentUser; // 👈 currentUser භාවිතය
     }
 
     const updatedLog = await FactoryLog.findOneAndUpdate(
       { date: targetDate },
       { $set: updateFields },
-      { new: true, upsert: true },
+      { new: true, upsert: true }
     );
 
-    res
-      .status(200)
-      .json({
-        message: "Daily factory log saved successfully.",
-        data: updatedLog,
-      });
+    // ==========================================
+    // 🌟 PACKING AUTOMATION (Only Local Sales to Pending) 🌟
+    // ==========================================
+    
+    const d = new Date(targetDate);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+
+    // Automation Helper Function (Only for Local Sale)
+    const syncPendingTransfer = async (typePrefix, qty, teaType) => {
+        const regex = new RegExp(`FACT/TO/${year}${month}${day}-${typePrefix}`);
+        
+        if (qty > 0 && teaType) {
+            const existingPending = await PendingTransfer.findOne({
+                date: targetDate,
+                transferNo: { $regex: regex },
+                status: "Pending" 
+            });
+
+            if (existingPending) {
+                // Update existing
+                existingPending.sentQtyKg = qty;
+                existingPending.grade = teaType;   
+                existingPending.teaType = teaType; 
+                existingPending.factoryUsername = currentUser; // 🌟 අනිවාර්යයෙන්ම නම Save වීම 🌟
+                await existingPending.save();
+            } else {
+                // Create New
+                const randomNum = Math.floor(100 + Math.random() * 900); // 3 digit random
+                const autoTransNo = `FACT/TO/${year}${month}${day}-${typePrefix}-${randomNum}`;
+                
+                const newPendingTransfer = new PendingTransfer({
+                    date: targetDate,
+                    transferNo: autoTransNo,
+                    grade: teaType,   
+                    teaType: teaType, 
+                    sentQtyKg: qty,
+                    factoryUsername: currentUser // 🌟 අනිවාර්යයෙන්ම නම Save වීම 🌟
+                });
+                await newPendingTransfer.save();
+            }
+        } else {
+            // Delete if quantity is made 0
+            await PendingTransfer.findOneAndDelete({
+                date: targetDate,
+                transferNo: { $regex: regex },
+                status: "Pending"
+            });
+        }
+    };
+
+    // Packing එකට Local Sale එක යැවීම
+    await syncPendingTransfer('LOC', updateFields.localSaleAndGratis, updateFields.localSaleTeaType);
+    
+    // ==========================================
+
+    res.status(200).json({
+      message: "Daily factory log saved successfully.",
+      data: updatedLog,
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Server error saving daily factory log." });
   }
 };
 
-// 3. DELETE FACTORY LOG (මකා දැමීමේ පහසුකම)
+// 3. DELETE FACTORY LOG
 export const deleteFactoryLog = async (req, res) => {
   try {
     const { id } = req.params;
@@ -186,6 +280,13 @@ export const deleteFactoryLog = async (req, res) => {
     if (!log) {
       return res.status(404).json({ message: "Record not found." });
     }
+
+    // අදාල දවසට අදාලව යවපු Pending Transfers ටිකත් මකා දමන්න
+    await PendingTransfer.deleteMany({
+        date: log.date,
+        transferNo: { $regex: /FACT\/TO\// },
+        status: "Pending"
+    });
 
     await FactoryLog.findByIdAndDelete(id);
     res.status(200).json({ message: "Record deleted successfully." });

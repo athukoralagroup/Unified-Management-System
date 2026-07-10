@@ -17,6 +17,7 @@ import {
   Layers,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 
 // Exact Colors
@@ -94,7 +95,6 @@ const TEA_TYPES = [
   "Premium",
   "Green tea",
   "Green tea bag (25)",
-  "New edition",
   "Pitigala tea bags",
   "Pitigala tea 400g",
   "Awurudu Special",
@@ -115,6 +115,19 @@ const getPackSizes = (product) => {
   return null;
 };
 
+// 👇 ADDED: Map specific products to their base tea grades for stock deduction
+export const getBaseTeaGrade = (productName) => {
+  if (!productName) return "";
+  const p = productName.toLowerCase().trim();
+  
+  if (p === "awurudu special") return "BOPF SP";
+  if (p === "labour drinking tea") return "BOPF";
+  if (p === "pitigala tea bags") return "Black Tea T/B";
+  if (p === "green tea bag (25)") return "Green Tea T/B";
+  
+  return productName;
+};
+
 export default function LocalRecordEntry() {
   const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
   const [showSpinner, setShowSpinner] = useState(false);
@@ -123,6 +136,8 @@ export default function LocalRecordEntry() {
   const [availableStock, setAvailableStock] = useState([]); // Tea Stock
   const [availablePackingStock, setAvailablePackingStock] = useState([]); // Raw Material (Packing) Stock
 
+  const [showWarningDialog, setShowWarningDialog] = useState(false);
+  const [warningMessages, setWarningMessages] = useState([]);
   const navigate = useNavigate();
 
   const [formData, setFormData] = useState({
@@ -145,15 +160,14 @@ export default function LocalRecordEntry() {
 
   const activeOptionRef = useRef(null);
 
-    // 👇 අලුතින් එකතු කරන useEffect එක (Scroll වීම සඳහා) 👇
-    useEffect(() => {
-        if (activeOptionRef.current) {
-            activeOptionRef.current.scrollIntoView({
-                behavior: 'auto',
-                block: 'nearest', 
-            });
-        }
-    }, [focusedOptionIndex]);
+  useEffect(() => {
+      if (activeOptionRef.current) {
+          activeOptionRef.current.scrollIntoView({
+              behavior: 'auto',
+              block: 'nearest', 
+          });
+      }
+  }, [focusedOptionIndex]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -176,41 +190,37 @@ export default function LocalRecordEntry() {
           fetch(`${BACKEND_URL}/api/packing-stock`, {
             headers: { Authorization: `Bearer ${token}` },
           }),
-          fetch(`${BACKEND_URL}/api/raw-materials-in/stock`, {
+          fetch(`${BACKEND_URL}/api/raw-materials-in/stock`, { // මෙතන URL එක /api/raw-materials නම් එය වෙනස් කරගන්න
             headers: { Authorization: `Bearer ${token}` },
           }).catch(() => ({ ok: false })),
         ]);
 
-        // Fetch Tea Stock
+        // 1. Fetch Tea Stock (UPDATED TO MATCH SUMMARY PAGE)
         if (teaRes.ok) {
-          const data = await teaRes.json();
-          const factoryAndOtherData = [];
-          data.forEach((product) => {
-            let validStock = 0;
-            if (product.stockBySource && product.stockBySource.length > 0) {
-              const factoryStock =
-                product.stockBySource.find((s) => s.sourceName === "Factory")
-                  ?.quantityKg || 0;
-              const otherStock =
-                product.stockBySource.find((s) => s.sourceName === "Other")
-                  ?.quantityKg || 0;
-              validStock = factoryStock + otherStock;
-            } else {
-              if (product.source === "Factory" || product.source === "Other") {
-                validStock = Number(product.bulkStockKg) || 0;
-              }
-            }
+          const teaData = await teaRes.json();
+          const allTeas = Array.isArray(teaData.data || teaData) ? (teaData.data || teaData) : [];
+          
+          const overallTeaStock = [];
+          
+          allTeas.forEach((product) => {
+            // Source එකෙන් නොබලා, කෙලින්ම Main Stock එක (totalBulkStockKg) ලබාගැනීම
+            const validStock = Number(product.totalBulkStockKg) || Number(product.bulkStockKg) || 0;
+            
             if (validStock > 0) {
-              factoryAndOtherData.push({
-                productName: product.productName,
+              overallTeaStock.push({
+                productName: product.productName || product.name,
                 bulkStockKg: validStock,
               });
             }
           });
-          setAvailableStock(factoryAndOtherData);
+
+          // (විකල්ප) නම් අනුව පිළිවෙලට හැදීම
+          overallTeaStock.sort((a, b) => a.productName.localeCompare(b.productName));
+          
+          setAvailableStock(overallTeaStock);
         }
 
-        // Fetch Packing Material Stock
+        // 2. Fetch Packing Material Stock
         if (rmRes.ok) {
           const rmData = await rmRes.json();
           const allRawMaterials = Array.isArray(rmData.data || rmData)
@@ -416,15 +426,16 @@ export default function LocalRecordEntry() {
     let stockWarning = false;
     let packingStockWarning = false;
     const requestedPacking = {};
+    const requestedByBaseGrade = {}; // 👇 Group tea usage by base grade
 
     pendingRecords.forEach((record) => {
       record.items.forEach((item) => {
-        // Check tea capacity
-        const stockData = availableStock.find(
-          (s) => s.productName === item.product,
-        );
-        const available = stockData ? stockData.bulkStockKg : 0;
-        if (Number(item.calculatedQtyKg) > available) stockWarning = true;
+        // Group tea usage by base grade
+        const baseGrade = getBaseTeaGrade(item.product);
+        if (!requestedByBaseGrade[baseGrade]) {
+            requestedByBaseGrade[baseGrade] = 0;
+        }
+        requestedByBaseGrade[baseGrade] += Number(item.calculatedQtyKg);
 
         // Sum requested packing materials
         if (item.packingMaterials && item.packingMaterials.length > 0) {
@@ -437,6 +448,15 @@ export default function LocalRecordEntry() {
         }
       });
     });
+
+    // Check tea capacity against available stock using baseGrade
+    for (const [baseGrade, requestedQty] of Object.entries(requestedByBaseGrade)) {
+        const stockData = availableStock.find(
+          (s) => s.productName?.toLowerCase() === baseGrade.toLowerCase()
+        );
+        const available = stockData ? stockData.bulkStockKg : 0;
+        if (requestedQty > available) stockWarning = true;
+    }
 
     // Check packing materials capacity
     for (const [pmName, requestedQty] of Object.entries(requestedPacking)) {
@@ -475,11 +495,16 @@ export default function LocalRecordEntry() {
           totalBoxes: record.totalBoxes,
           totalQtyKg: record.totalQtyKg,
           salesItems: record.items.map((item) => ({
-            product: item.product,
-            packSizeKg: Number(item.packSizeKg),
-            numberOfBoxes: Number(item.numberOfBoxes),
-            totalQtyKg: Number(item.calculatedQtyKg),
-            packingMaterials: item.packingMaterials || [],
+              product: item.product,
+              baseTeaGrade: getBaseTeaGrade(item.product),
+              packSizeKg: Number(item.packSizeKg),
+              numberOfBoxes: Number(item.numberOfBoxes),
+              totalQtyKg: Number(item.calculatedQtyKg),
+              // 👇 මේ field එක එකතු කරන්න
+              baseTeaQtyKg: Number(item.baseTeaQtyKg || (Number(item.calculatedQtyKg) - Number(item.rawMaterialQtyKg))),
+              rawMaterialName: item.rawMaterialName || "",
+              rawMaterialQtyKg: Number(item.rawMaterialQtyKg || 0),
+              packingMaterials: item.packingMaterials || [],
           })),
         };
 
@@ -523,7 +548,6 @@ export default function LocalRecordEntry() {
     }
   };
 
-  // 👇 අලුතින් එකතු කරන Function එක 👇
   const handleKeyDown = (e, rowId, filteredOptions) => {
     if (!openDropdownId || filteredOptions.length === 0) return;
 
@@ -688,16 +712,19 @@ export default function LocalRecordEntry() {
                 {itemsList.map((row) => {
                   const availableSizes = getPackSizes(row.product);
 
+                  // 👇 Find stock based on base grade mapping
+                  const baseGrade = getBaseTeaGrade(row.product);
                   const stockData = availableStock.find(
-                    (s) => s.productName === row.product,
+                    (s) => s.productName?.toLowerCase() === baseGrade.toLowerCase(),
                   );
                   const availableForProduct = stockData
                     ? stockData.bulkStockKg
                     : 0;
 
+                  // 👇 Calculate accumulated usage per base grade
                   const totalIssuedForProductSoFar = itemsList.reduce(
                     (sum, currentItem) => {
-                      if (currentItem.product === row.product) {
+                      if (getBaseTeaGrade(currentItem.product).toLowerCase() === baseGrade.toLowerCase()) {
                         return (
                           sum +
                           (Number(currentItem.packSizeKg) *
@@ -736,7 +763,6 @@ export default function LocalRecordEntry() {
 
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                         {/* Custom Product Autocomplete Input */}
-                        {/* Custom Product Autocomplete Input */}
                         <div
                           className="lg:col-span-1 relative"
                           ref={(el) =>
@@ -755,7 +781,6 @@ export default function LocalRecordEntry() {
                             Product
                           </label>
 
-                          {/* 👇 අලුත් වෙනස්කම් සහිත Input එක 👇 */}
                           <input
                             type="text"
                             placeholder="Select..."
@@ -792,7 +817,6 @@ export default function LocalRecordEntry() {
                                   .toLowerCase()
                                   .includes(row.product.toLowerCase()),
                               ).map((tea, idx) => {
-                                // 👇 Arrow key එකෙන් තෝරාගත් අයිතමය Highlight වීම 👇
                                 const isFocused = focusedOptionIndex === idx;
 
                                 return (
@@ -920,14 +944,6 @@ export default function LocalRecordEntry() {
                                 }
                               />
                             </span>
-                            {row.product && (
-                              <span className="text-[10px] font-bold text-gray-400">
-                                Avail:{" "}
-                                <span className="text-gray-700 dark:text-gray-300">
-                                  {availableForProduct.toFixed(2)}
-                                </span>
-                              </span>
-                            )}
                           </label>
                           <div
                             className={`w-full p-2.5 border font-bold text-sm rounded-md text-center transition-colors ${isOverCapacity ? "border-amber-400 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400" : "border-teal-300 dark:border-teal-700/50 bg-[#f0fdfa] dark:bg-teal-900/30 text-[#0f766e] dark:text-teal-400"}`}
@@ -941,6 +957,14 @@ export default function LocalRecordEntry() {
                                 ).toFixed(2)
                               : "0.00"}
                           </div>
+                          {row.product && (
+                              <span className="text-[10px] font-bold text-gray-400">
+                                Avail {baseGrade}:{" "}
+                                <span className="text-gray-700 dark:text-gray-300">
+                                  {availableForProduct.toFixed(2)}
+                                </span>
+                              </span>
+                            )}
                         </div>
                       </div>
 
@@ -1216,7 +1240,7 @@ export default function LocalRecordEntry() {
                                 </div>
                                 {item.packingMaterials &&
                                   item.packingMaterials.length > 0 && (
-                                    <div className="text-[10px] text-gray-500 flex flex-wrap gap-x-2 gap-y-1">
+                                    <div className="text-[10px] text-gray-500 flex flex-wrap gap-x-2 gap-y-1 mt-1">
                                       {item.packingMaterials.map(
                                         (pm, pmIdx) => (
                                           <span
@@ -1319,6 +1343,35 @@ export default function LocalRecordEntry() {
           )}
         </div>
       </div>
+
+      {/* --- STOCK WARNING DIALOG --- */}
+      <AlertDialog open={showWarningDialog} onOpenChange={setShowWarningDialog}>
+        <AlertDialogContent className="bg-white dark:bg-zinc-900 rounded-2xl border-gray-100 dark:border-zinc-800 shadow-xl max-w-sm sm:max-w-md w-[90vw]">
+          <AlertDialogHeader>
+            <div className="w-10 sm:w-12 h-10 sm:h-12 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center mb-3 sm:mb-4 border border-amber-200 dark:border-amber-800">
+              <AlertTriangle className="w-5 sm:w-6 h-5 sm:h-6 text-amber-600 dark:text-amber-500" />
+            </div>
+            <AlertDialogTitle className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white">
+              Stock Limit Exceeded
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-gray-500 dark:text-gray-400 text-sm sm:text-base">
+              You are issuing MORE stock than what is currently available for:
+              <ul className="list-disc pl-5 mt-3 mb-4 space-y-1 font-semibold text-gray-700 dark:text-gray-300">
+                {warningMessages.map((msg, i) => (
+                  <li key={i}>{msg}</li>
+                ))}
+              </ul>
+              Please adjust the quantities before saving.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-4 sm:mt-6 flex justify-end w-full">
+            <AlertDialogCancel onClick={() => setShowWarningDialog(false)} className="bg-red-600 hover:bg-red-700 text-white border-none px-6 w-full">
+              Close & Fix
+            </AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
     </div>
   );
 }

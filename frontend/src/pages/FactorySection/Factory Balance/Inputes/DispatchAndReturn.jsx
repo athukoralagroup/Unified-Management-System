@@ -1,0 +1,496 @@
+import React, { useState, useEffect, useRef } from 'react';
+import toast from 'react-hot-toast';
+import { Save, Trash2, Package, RefreshCcw, ListChecks, PlusCircle, Truck, Store, Tag } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+
+// --- Shared Input Styles ---
+const inputStyles = "w-full p-3.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl font-bold text-gray-700 dark:text-gray-200 focus:ring-4 focus:ring-teal-500/20 dark:focus:ring-teal-400/20 focus:outline-none transition-all";
+
+// --- Tea Type Predefined Options ---
+const teaTypeOptions = [
+  "BOPF", "BOPF SP", "OPA", "OP 1", "OP", "Pekoe", "BOP",
+  "FBOP", "FF SP", "FF EX SP", "Dust", "Dust 1", "Premium"
+];
+
+// --- Custom Autocomplete Component ---
+const TeaTypeAutocomplete = ({ name, value, onChange, placeholder }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const wrapperRef = useRef(null);
+
+  // Filter options based on what the user types
+  const filteredOptions = teaTypeOptions.filter(opt =>
+    opt.toLowerCase().includes((value || '').toLowerCase())
+  );
+
+  // Close dropdown if clicked outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleKeyDown = (e) => {
+    if (!isOpen) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") setIsOpen(true);
+      return;
+    }
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlightedIndex(prev => (prev < filteredOptions.length - 1 ? prev + 1 : prev));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlightedIndex(prev => (prev > 0 ? prev - 1 : 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault(); // Prevent form submission
+      if (highlightedIndex >= 0 && highlightedIndex < filteredOptions.length) {
+        onChange({ target: { name, value: filteredOptions[highlightedIndex] } });
+        setIsOpen(false);
+      }
+    } else if (e.key === "Escape") {
+      setIsOpen(false);
+    }
+  };
+
+  return (
+    <div className="relative" ref={wrapperRef}>
+      <Tag size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 z-10" />
+      <input
+        type="text"
+        name={name}
+        value={value}
+        onChange={(e) => {
+          onChange(e);
+          setIsOpen(true);
+          setHighlightedIndex(-1);
+        }}
+        onFocus={() => setIsOpen(true)}
+        onKeyDown={handleKeyDown}
+        placeholder={placeholder}
+        className={`${inputStyles} pl-10 relative z-0`}
+        autoComplete="off"
+      />
+      {/* Dropdown Menu */}
+      {isOpen && filteredOptions.length > 0 && (
+        <ul className="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl max-h-56 overflow-y-auto custom-scrollbar overflow-hidden">
+          {filteredOptions.map((opt, index) => (
+            <li
+              key={opt}
+              className={`px-4 py-2.5 cursor-pointer text-sm font-bold transition-colors ${
+                highlightedIndex === index
+                  ? "bg-teal-50 dark:bg-teal-900/40 text-teal-700 dark:text-teal-400"
+                  : "text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50"
+              }`}
+              onMouseDown={(e) => {
+                e.preventDefault(); // Prevents input from losing focus
+                onChange({ target: { name, value: opt } });
+                setIsOpen(false);
+              }}
+              onMouseEnter={() => setHighlightedIndex(index)}
+            >
+              {opt}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+};
+
+
+// --- MAIN COMPONENT ---
+export default function DispatchAndReturn() {
+  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
+  const navigate = useNavigate();
+  
+  // States
+  const [isSavingAll, setIsSavingAll] = useState(false);
+  const [records, setRecords] = useState([]);
+  const [pendingRecords, setPendingRecords] = useState([]);
+
+  // Dark Mode State
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    return localStorage.getItem('theme') === 'dark' || false;
+  });
+
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  });
+
+  const [formData, setFormData] = useState({
+    date: new Date().toISOString().split('T')[0],
+    invoiceNo: '',
+    dispatchTeaType: '',
+    dispatch: '', // Total Gross Weight
+    localSaleTeaType: '',
+    localSaleAndGratis: '', // Total qty (kg)
+    returnAmount: '',
+  });
+
+  useEffect(() => {
+    if (formData.date) {
+      const selectedDateMonth = formData.date.substring(0, 7); 
+      if (selectedDateMonth !== selectedMonth) {
+        setSelectedMonth(selectedDateMonth);
+      }
+    }
+  }, [formData.date, selectedMonth]);
+
+  const username = localStorage.getItem('username') || 'Unknown User';
+  const userRole = localStorage.getItem('userRole') || '';
+  const isViewer = userRole.toLowerCase() === 'viewer' || userRole.toLowerCase() === 'view';
+
+  // Calculate Total Out based on Dispatch weight + Local Sale weight
+  const calculatedTotalOut = (Number(formData.dispatch) || 0) + (Number(formData.localSaleAndGratis) || 0);
+
+  // Dark Mode Toggle Effect
+  useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('theme', 'light');
+    }
+  }, [isDarkMode]);
+
+  const fetchFactoryData = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${BACKEND_URL}/api/factory-logs?month=${selectedMonth}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setRecords(data.records || []);
+      }
+    } catch (error) {
+      toast.error("Network error fetching previous records.");
+    }
+  };
+
+  useEffect(() => {
+    fetchFactoryData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMonth]);
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData({ ...formData, [name]: value });
+  };
+
+  const handleAddToList = (e) => {
+    e.preventDefault();
+    if (isViewer) {
+      toast.error("Viewers cannot add records.");
+      return;
+    }
+
+    const isAlreadyInQueue = pendingRecords.some(r => r.date === formData.date);
+    if (isAlreadyInQueue) {
+      toast.error(`A record for ${formData.date} is already in the pending list!`);
+      return;
+    }
+
+    const existingRecord = records.find(r => r.date.split('T')[0] === formData.date);
+
+    const newRecord = {
+      ...formData,
+      calculatedTotalOut,
+      greenLeafToday: existingRecord ? (existingRecord.greenLeaf?.today || existingRecord.greenLeafToday || 0) : 0,    
+    };
+
+    setPendingRecords([...pendingRecords, newRecord]);
+    toast.success("Added to list!");
+    
+    // Reset Form (except date)
+    setFormData({ 
+      ...formData, 
+      invoiceNo: '',
+      dispatchTeaType: '',
+      dispatch: '', 
+      localSaleTeaType: '',
+      localSaleAndGratis: '', 
+      returnAmount: '' 
+    });
+  };
+
+  const handleRemoveFromList = (indexToRemove) => {
+    setPendingRecords(pendingRecords.filter((_, index) => index !== indexToRemove));
+  };
+
+  const handleSaveAll = async () => {
+    if (pendingRecords.length === 0) return;
+    setIsSavingAll(true);
+    const toastId = toast.loading(`Saving ${pendingRecords.length} dispatch records...`);
+
+    try {
+      const token = localStorage.getItem('token');
+      const authHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
+
+      for (const record of pendingRecords) {
+        const payload = {
+          date: record.date,
+          greenLeafToday: Number(record.greenLeafToday) || 0,
+          dispatch: Number(record.dispatch) || 0,
+          localSaleAndGratis: Number(record.localSaleAndGratis) || 0,
+          returnAmount: Number(record.returnAmount) || 0,
+          invoiceNo: record.invoiceNo,
+          dispatchTeaType: record.dispatchTeaType,
+          localSaleTeaType: record.localSaleTeaType,
+          username: username
+        };
+
+        const res = await fetch(`${BACKEND_URL}/api/factory-logs`, {
+          method: 'POST',
+          headers: authHeaders,
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error(`Failed to save record for ${record.date}`);
+      }
+
+      toast.success("Dispatch records saved!", { id: toastId });
+      setPendingRecords([]);
+      navigate("/factory/view");
+    } catch (error) {
+      toast.error(error.message || "Error saving records.", { id: toastId });
+    } finally {
+      setIsSavingAll(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen p-4 sm:p-6 md:p-8 font-sans transition-colors duration-300 bg-[#f3faf7] dark:bg-gray-900">
+      <div className="max-w-[1200px] mx-auto">
+        
+        {/* HEADER & TOGGLE */}
+        <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center gap-4">
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center shadow-sm border bg-[#f0fdfa] dark:bg-teal-900/30 border-[#99f6e4] dark:border-teal-800 text-[#0d5e4d] dark:text-teal-400 transition-colors">
+              <Package size={32} />
+            </div>
+            <div>
+              <h2 className="text-2xl sm:text-3xl font-black text-[#0d5e4d] dark:text-teal-400 transition-colors">Dispatch & Returns</h2>
+              <p className="font-semibold mt-1 uppercase tracking-wider text-sm text-[#0f766e] dark:text-teal-500 transition-colors">Daily Outgoing Logs</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+          
+          {/* FORM SIDE */}
+          <div className="lg:col-span-7 space-y-6">
+            <form onSubmit={handleAddToList} className="bg-white dark:bg-gray-800 p-5 sm:p-8 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700 transition-colors">
+              
+              <div className="mb-6 pb-6 border-b border-gray-100 dark:border-gray-700">
+                <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Record Date</label>
+                <input 
+                  type="date" name="date" value={formData.date} onChange={handleInputChange} required 
+                  className={inputStyles}
+                />
+              </div>
+
+              {/* 1. DISPATCH SECTION */}
+              <div className="bg-gray-50/50 dark:bg-gray-900/50 border border-gray-100 dark:border-gray-700 rounded-2xl p-5 shadow-sm mb-6 transition-colors">
+                <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-[#0f766e] dark:text-teal-400 border-b border-gray-200 dark:border-gray-700 pb-3">
+                  <div className="p-1.5 rounded-lg bg-teal-100 dark:bg-teal-900/50 text-teal-700 dark:text-teal-300"><Truck size={18}/></div>
+                  Dispatch Details
+                </h3>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Invoice No.</label>
+                    <input 
+                      type="text" name="invoiceNo" value={formData.invoiceNo} onChange={handleInputChange} 
+                      placeholder="Enter Invoice Number" className={inputStyles} 
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Tea Type</label>
+                    {/* 🌟 New Custom Dropdown component added here */}
+                    <TeaTypeAutocomplete
+                      name="dispatchTeaType"
+                      value={formData.dispatchTeaType}
+                      onChange={handleInputChange}
+                      placeholder="E.g. BOPF, Pekoe"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Total Gross Weight (kg)</label>
+                  <input 
+                    type="number" step="0.01" min="0" name="dispatch" 
+                    value={formData.dispatch} onChange={handleInputChange} 
+                    onWheel={(e) => e.target.blur()} placeholder="0.00 kg" className={inputStyles} 
+                  />
+                </div>
+              </div>
+
+              {/* 2. LOCAL SALES SECTION */}
+              <div className="bg-gray-50/50 dark:bg-gray-900/50 border border-gray-100 dark:border-gray-700 rounded-2xl p-5 shadow-sm mb-6 transition-colors">
+                <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-[#b45309] dark:text-orange-400 border-b border-gray-200 dark:border-gray-700 pb-3">
+                  <div className="p-1.5 rounded-lg bg-orange-100 dark:bg-orange-900/50 text-orange-700 dark:text-orange-300"><Store size={18}/></div>
+                  Local Sales Details
+                </h3>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Tea Type</label>
+                    {/* 🌟 New Custom Dropdown component added here */}
+                    <TeaTypeAutocomplete
+                      name="localSaleTeaType"
+                      value={formData.localSaleTeaType}
+                      onChange={handleInputChange}
+                      placeholder="E.g. Dust, Fannings"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Total Qty (kg)</label>
+                    <input 
+                      type="number" step="0.01" min="0" name="localSaleAndGratis" 
+                      value={formData.localSaleAndGratis} onChange={handleInputChange} 
+                      onWheel={(e) => e.target.blur()} placeholder="0.00 kg" className={inputStyles} 
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* TOTAL OUT SUMMARY */}
+              <div className="mb-6 p-4 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+                <label className="block text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Total Out (Dispatch + Local Sales)</label>
+                <div className="w-full text-xl flex items-center font-black text-gray-800 dark:text-gray-200 transition-colors">
+                  {calculatedTotalOut > 0 ? calculatedTotalOut.toFixed(2) : '0.00'} <span className="text-sm text-gray-500 ml-1">kg</span>
+                </div>
+              </div>
+
+              {/* 3. RETURNS SECTION */}
+              <div className="bg-gray-50/50 dark:bg-gray-900/50 border border-gray-100 dark:border-gray-700 rounded-2xl p-5 shadow-sm mb-6 transition-colors">
+                <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-gray-700 dark:text-gray-300">
+                  <div className="p-1.5 rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300"><RefreshCcw size={18}/></div> Returns
+                </h3>
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Return Amount (kg)</label>
+                  <input 
+                    type="number" step="0.01" min="0" name="returnAmount" 
+                    value={formData.returnAmount} onChange={handleInputChange} 
+                    onWheel={(e) => e.target.blur()} placeholder="0.00" className={inputStyles} 
+                  />
+                </div>
+              </div>
+
+              <button 
+                type="submit" 
+                disabled={isViewer} 
+                className="w-full py-4 rounded-2xl text-white font-black text-lg uppercase tracking-wider flex justify-center items-center gap-2 shadow-lg transition-all hover:-translate-y-0.5 bg-gradient-to-br from-[#163d2e] via-[#0d5e4d] to-[#0f766e] dark:from-teal-700 dark:via-teal-600 dark:to-teal-800 disabled:opacity-50"
+              >
+                <PlusCircle size={22} /> Add to Queue
+              </button> 
+            </form>
+          </div>
+
+          {/* QUEUE SIDE */}
+          <div className="lg:col-span-5 flex flex-col h-full max-h-[85vh]">
+            <div className="bg-white dark:bg-gray-800 rounded-3xl shadow-sm border border-gray-200 dark:border-gray-700 flex-1 flex flex-col overflow-hidden sticky top-6 transition-colors">
+              
+              <div className="bg-gray-50 dark:bg-gray-800/80 p-5 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-white dark:bg-gray-700 shadow-sm border border-gray-100 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300">
+                    <ListChecks size={18} />
+                  </div>
+                  <h3 className="font-bold text-gray-800 dark:text-gray-200">Dispatch Queue</h3>
+                </div>
+                <span className="bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs font-black px-3 py-1 rounded-full">
+                  {pendingRecords.length}
+                </span>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4 bg-gray-50/50 dark:bg-gray-900/30">
+                {pendingRecords.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center text-gray-400 dark:text-gray-500 py-10">
+                    <p className="text-sm font-bold">Queue is empty</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {pendingRecords.map((item, index) => (
+                      <div key={index} className="bg-white dark:bg-gray-800 p-4 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-sm relative group transition-colors">
+                        
+                        <button 
+                          onClick={() => handleRemoveFromList(index)} 
+                          className="absolute top-3 right-3 text-gray-400 hover:text-red-500 bg-white dark:bg-gray-700 p-1.5 rounded-md border border-gray-100 dark:border-gray-600 transition-colors"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+
+                        <div className="flex flex-col gap-3 pr-8">
+                          <span className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase">{item.date}</span>
+                          
+                          <div className="text-xs font-medium text-gray-600 dark:text-gray-300 space-y-2 mb-1">
+                            {/* Dispatch Summary Line */}
+                            <div className="flex flex-col bg-teal-50/50 dark:bg-teal-900/10 p-2 rounded-lg border border-teal-100 dark:border-teal-800/30">
+                              <div className="flex justify-between items-center text-[#0f766e] dark:text-teal-400 mb-1">
+                                <span className="font-bold flex items-center gap-1"><Truck size={12}/> Dispatch</span>
+                                <span className="font-black">{item.dispatch || '0'} kg</span>
+                              </div>
+                              <div className="text-[10px] text-gray-500 dark:text-gray-400 flex gap-2">
+                                {item.invoiceNo && <span>Inv: {item.invoiceNo}</span>}
+                                {item.dispatchTeaType && <span>Type: {item.dispatchTeaType}</span>}
+                              </div>
+                            </div>
+                            
+                            {/* Local Sale Summary Line */}
+                            <div className="flex flex-col bg-orange-50/50 dark:bg-orange-900/10 p-2 rounded-lg border border-orange-100 dark:border-orange-800/30">
+                              <div className="flex justify-between items-center text-[#b45309] dark:text-orange-400 mb-1">
+                                <span className="font-bold flex items-center gap-1"><Store size={12}/> Local Sales</span>
+                                <span className="font-black">{item.localSaleAndGratis || '0'} kg</span>
+                              </div>
+                              <div className="text-[10px] text-gray-500 dark:text-gray-400">
+                                {item.localSaleTeaType && <span>Type: {item.localSaleTeaType}</span>}
+                              </div>
+                            </div>
+                          </div>
+                          
+                          <div className="bg-gray-100 dark:bg-gray-700 p-2 rounded-lg border border-gray-200 dark:border-gray-600 flex justify-between px-3 text-xs font-bold text-gray-800 dark:text-gray-200 transition-colors">
+                            <span>Total Out:</span><span>{item.calculatedTotalOut.toFixed(2)} kg</span>
+                          </div>
+                          
+                          {item.returnAmount && Number(item.returnAmount) > 0 && (
+                            <div className="bg-blue-50/50 dark:bg-blue-900/20 p-2 rounded-lg border border-blue-100 dark:border-blue-800/50 flex justify-between px-3 text-xs font-bold text-blue-800 dark:text-blue-400 transition-colors">
+                              <span>Returns:</span><span>{item.returnAmount} kg</span>
+                            </div>
+                          )}
+
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="p-5 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 transition-colors">
+                <button 
+                  onClick={handleSaveAll} 
+                  disabled={isSavingAll || pendingRecords.length === 0} 
+                  className={`w-full py-4 rounded-2xl font-black flex justify-center items-center gap-2 transition-all ${
+                    isSavingAll || pendingRecords.length === 0 
+                      ? 'bg-gray-300 dark:bg-gray-700 text-gray-500 dark:text-gray-500 cursor-not-allowed' 
+                      : 'text-white shadow-lg hover:-translate-y-0.5 bg-gradient-to-br from-[#163d2e] via-[#0d5e4d] to-[#0f766e] dark:from-teal-700 dark:via-teal-600 dark:to-teal-800'
+                  }`}
+                >
+                  <Save size={18} /> {isSavingAll ? "Saving..." : `Save Records (${pendingRecords.length})`}
+                </button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  );
+}
