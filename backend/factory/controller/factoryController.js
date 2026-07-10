@@ -187,6 +187,8 @@ export const saveDailyFactoryLog = async (req, res) => {
       factoryBalance: Number(currentBalance.toFixed(2)),
     };
 
+    // factoryLogController.js එක ඇතුළේ saveDailyFactoryLog function එකේ updateFields වලට පස්සේ කොටස:
+
     if (existingRecord) {
       if (isExplicitEdit) {
         updateFields.isEdited = true;
