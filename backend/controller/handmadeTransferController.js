@@ -49,7 +49,7 @@ export const createHandmadeTransfer = async (req, res) => {
             const payload = JSON.stringify({
                 title: '📦 New Handmade Transfer',
                 message: `A new transfer of ${totalQty}kg arrived from Handmade! (${transferId})`,
-                url: '/packing/trans-in' // 👈 Packing අංශයේ Handmade බඩු ගන්න Page එකේ ලින්ක් එක දාන්න
+                url: 'packing/trans-in-entry'
             });
 
             await Promise.all(
