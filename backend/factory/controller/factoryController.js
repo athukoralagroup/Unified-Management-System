@@ -202,7 +202,10 @@ export const saveDailyFactoryLog = async (req, res) => {
         // 🌟 PUSH NOTIFICATION CODE (Packing අංශයට යැවීම) 🌟
         // ========================================================
         try {
-            const subscriptions = await Subscription.find({ section: "Packing" });
+            // 'Packing Officer' අයට විතරක් යැවීමට ෆිල්ටර් කිරීම
+            const subscriptions = await Subscription.find({ 
+                role: "Packing Officer" // 👈 ඔයාගේ සිස්ටම් එකේ Role එකේ නම හරියටම මෙතනට දෙන්න
+            });
             const payload = JSON.stringify({
                 title: '🏭 New Factory Transfer',
                 message: `A new transfer of ${sale.weight}kg (${sale.teaType}) arrived from Factory!`,
