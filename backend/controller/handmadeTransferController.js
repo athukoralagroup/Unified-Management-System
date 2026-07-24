@@ -1,6 +1,10 @@
 import StockTransfer from '../models/StockTransfer.js';
 import {Production} from '../models/Production.js'; // <-- Changed to your Production model
+import webpush from 'web-push';
+import Subscription from '../Packing/models/SubscriptionModel.js';
 
+// @desc    Create a new stock transfer (Handmade -> Packing)
+// @route   POST /api/handmade/transfers
 // @desc    Create a new stock transfer (Handmade -> Packing)
 // @route   POST /api/handmade/transfers
 export const createHandmadeTransfer = async (req, res) => {
@@ -31,6 +35,39 @@ export const createHandmadeTransfer = async (req, res) => {
         });
 
         const savedTransfer = await newTransfer.save();
+
+        // ========================================================
+        // 🌟 PUSH NOTIFICATION CODE (Packing Officer ට පමණක් යැවීම) 🌟
+        // ========================================================
+        try {
+            // "Packing Officer" Role එක තියෙන අයව පමණක් තෝරාගැනීම
+            const subscriptions = await Subscription.find({ role: "Packing Officer" });
+            
+            // යවන සම්පූර්ණ ප්‍රමාණය (Total Qty) එකතු කරගැනීම
+            const totalQty = items.reduce((sum, item) => sum + Number(item.issuedQtyKg), 0);
+
+            const payload = JSON.stringify({
+                title: '📦 New Handmade Transfer',
+                message: `A new transfer of ${totalQty}kg arrived from Handmade! (${transferId})`,
+                url: '/packing/trans-in' // 👈 Packing අංශයේ Handmade බඩු ගන්න Page එකේ ලින්ක් එක දාන්න
+            });
+
+            await Promise.all(
+                subscriptions.map(async (sub) => {
+                    try {
+                        await webpush.sendNotification(sub, payload);
+                    } catch(err) {
+                        if (err.statusCode === 410) {
+                            await Subscription.deleteOne({ endpoint: sub.endpoint });
+                        }
+                    }
+                })
+            );
+        } catch (pushErr) {
+            console.error("Notification error:", pushErr);
+        }
+        // ========================================================
+
         res.status(201).json(savedTransfer);
 
     } catch (error) {
