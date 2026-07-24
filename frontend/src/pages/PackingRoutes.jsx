@@ -12,7 +12,7 @@ import EditTeaCenterRecord from "./PackingSection/Tea center/EditTeaCenterRecord
 import TeaGradesReceivedEntry from "./PackingSection/Trans In Factory/TeaGradesReceivedEntry";
 import EditTeaReceivedRecord from "./PackingSection/Trans In Factory/EditTeaReceivedRecord";
 import ViewTeaGradesReceivedRecords from "./PackingSection/Trans In Factory/ViewTeaGradesReceivedRecords";
-import ProductIssueSummary from "./PackingSection/Summary report/ProductIssueSummary";
+import ProductIssueSummary from "./PackingSection/Summary Report/ProductIssueSummary";
 import ViewPackingStock from "./PackingSection/Summary Report/ViewPackingStock";
 import TeaGradesReceivedOutEntry from "./PackingSection/Trans In other/TeaGradesReceivedOutEntry";
 import ViewTeaGradesReceivedOutRecords from "./PackingSection/Trans In other/ViewTeaGradesReceivedOutRecords";
