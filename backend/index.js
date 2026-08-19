@@ -4,7 +4,7 @@ import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import cors from 'cors';
 import webpush from 'web-push'; 
-import cron from 'node-cron'; // <-- IMPORT CRON HERE
+import cron from 'node-cron'; 
 
 // --- Import the automated BM logic ---
 import { updateBMStockLogic } from './localsale/controllers/monthlyBalanceController.js'; 
@@ -44,6 +44,11 @@ import Subscription from './Packing/models/SubscriptionModel.js';
 import dailySummaryRouter from './localsale/routes/dailySummaryRoutes.js';
 import issueTypeRouter from './localsale/routes/issueTypeRoutes.js';
 import monthlyBalanceRouter from './localsale/routes/monthlyBalanceRoutes.js';
+
+
+// Manufacturer Section Routes
+import factoryLoftLeafRouter from './manufacturer/routes/loftLeafRoutes.js';
+import WitherLeafRouter from './manufacturer/routes/witherLeafRouter.js';
 
 dotenv.config();
 const app = express();
@@ -150,6 +155,10 @@ app.use('/api/factory-packs', factoryPackRoutes);
 app.use('/api/summary', dailySummaryRouter); 
 app.use('/api/issue-summary', issueTypeRouter);
 app.use('/api/monthly-balance', monthlyBalanceRouter); 
+
+// Manufacturer Section Routes
+app.use('/api/factory-loft-leaf', factoryLoftLeafRouter);
+app.use('/api/wither-leaf', WitherLeafRouter);
 
 app.listen(3000, () => {
   console.log('Server is running on port 3000');
