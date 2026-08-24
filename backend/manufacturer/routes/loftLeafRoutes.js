@@ -8,5 +8,4 @@ factoryLoftLeafRouter.post('/collector', saveCollectorSample);
 factoryLoftLeafRouter.get('/report', getDailyReport);
 factoryLoftLeafRouter.put('/:id', updateRecord); // Edit Function 
 factoryLoftLeafRouter.delete('/:id', deleteRecord); // Delete Function 
-
 export default factoryLoftLeafRouter;
