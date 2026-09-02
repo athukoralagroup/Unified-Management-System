@@ -50,8 +50,10 @@ import monthlyBalanceRouter from './localsale/routes/monthlyBalanceRoutes.js';
 import factoryLoftLeafRouter from './manufacturer/routes/loftLeafRoutes.js';
 import WitherLeafRouter from './manufacturer/routes/witherLeafRouter.js';
 import rollingRouter from './manufacturer/routes/rollingRoomSheetRoutes.js';
+import FiringRouter from './manufacturer/routes/firingSectionRoutes.js';
 import hydroMeterRouter from './manufacturer/routes/hydroMeterRoutes.js';
 import { Production } from './models/Production.js';
+import pdfTotalRouter from './manufacturer/routes/pdfTotalRoutes.js';
 
 dotenv.config();
 const app = express();
@@ -209,7 +211,9 @@ app.use('/api/monthly-balance', monthlyBalanceRouter);
 app.use('/api/factory-loft-leaf', factoryLoftLeafRouter);
 app.use('/api/wither-leaf', WitherLeafRouter);
 app.use('/api/rolling-room-sheet', rollingRouter); 
+app.use('/api/firing-section', FiringRouter); 
 app.use('/api/hydro-meters', hydroMeterRouter);
+app.use('/api/pdf-totals', pdfTotalRouter);
 
 app.listen(3000, () => {
   console.log('Server is running on port 3000');
