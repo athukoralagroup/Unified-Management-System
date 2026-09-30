@@ -54,7 +54,7 @@ import hydroMeterRouter from './manufacturer/routes/hydroMeterRoutes.js';
 import { Production } from './models/Production.js';
 import pdfTotalRouter from './manufacturer/routes/pdfTotalRoutes.js';
 import tc5router from './manufacturer/routes/tc5ReportRoutes.js';
-import teaCenterIssueRouter from './Packing/Routes/TeaCenterIssueRouter.js';
+import teaCenterIssueRouter from './Packing/Routes/teaCenterIssueRouter.js';
 
 dotenv.config();
 const app = express();
@@ -66,17 +66,8 @@ webpush.setVapidDetails(
   process.env.PRIVATE_VAPID_KEY
 );
 
-// Enable CORS for specific origins
-app.use(cors({
-    origin: [
-        'https://unifiedmanagementsystemathukoralagroup.vercel.app', // ඔයාගේ Vercel frontend URL එක
-        'http://localhost:5173', // Local development වලට (Vite නම්)
-        'http://localhost:3000'  // Local development වලට (React නම්)
-    ],
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-    credentials: true // ඔයා Login එකේදී cookies හෝ tokens පාවිච්චි කරනවා නම් මේක අනිවාර්යයි
-}));
+// Enable CORS for all routes
+app.use(cors());
 
 // Middleware 
 app.use(bodyParser.json());
