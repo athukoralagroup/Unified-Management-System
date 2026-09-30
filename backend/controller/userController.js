@@ -14,8 +14,8 @@ export const getAllUsers = async (req, res) => {
 // CREATE USER
 export const createUser = async (req, res) => {
   try {
-    // 👇 Frontend එකෙන් එවන allowedPaths ලබාගැනීම
-    const { username, password, role, allowedPaths } = req.body;
+    // 💡 NEW: req.body එකෙන් allowedPages ලබාගැනීම
+    const { username, password, role, allowedPaths, allowedPages } = req.body;
 
     const existingUser = await User.findOne({ username });
     if (existingUser) {
@@ -26,7 +26,8 @@ export const createUser = async (req, res) => {
         username, 
         password, 
         role: role || 'User',
-        allowedPaths: allowedPaths || [] // 👇 අලුතින් save කරන කොටස
+        allowedPaths: allowedPaths || [],
+        allowedPages: allowedPages || [] // 💡 NEW: අලුත් User ගේ allowedPages සේව් කිරීම
     });
     
     await newUser.save();
@@ -42,8 +43,8 @@ export const createUser = async (req, res) => {
 // UPDATE USER
 export const updateUser = async (req, res) => {
   try {
-    // 👇 Update කරද්දී එවන allowedPaths ලබාගැනීම
-    const { username, role, password, allowedPaths } = req.body;
+    // 💡 NEW: req.body එකෙන් allowedPages ලබාගැනීම
+    const { username, role, password, allowedPaths, allowedPages } = req.body;
 
     const user = await User.findById(req.params.id);
     if (!user) {
@@ -53,8 +54,10 @@ export const updateUser = async (req, res) => {
     if (username) user.username = username;
     if (role) user.role = role;
     
-    // 👇 allowedPaths එවා ඇත්නම් එය යාවත්කාලීන කිරීම
     if (allowedPaths) user.allowedPaths = allowedPaths;
+    
+    // 💡 NEW: User Update කරද්දී අලුත් allowedPages ටික සේව් කිරීම
+    if (allowedPages) user.allowedPages = allowedPages; 
 
     // FIX: only set password if exists
     if (password && password.trim() !== '') {
