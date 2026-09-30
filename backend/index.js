@@ -66,8 +66,17 @@ webpush.setVapidDetails(
   process.env.PRIVATE_VAPID_KEY
 );
 
-// Enable CORS for all routes
-app.use(cors());
+// Enable CORS for specific origins
+app.use(cors({
+    origin: [
+        'https://unifiedmanagementsystemathukoralagroup.vercel.app', // ඔයාගේ Vercel frontend URL එක
+        'http://localhost:5173', // Local development වලට (Vite නම්)
+        'http://localhost:3000'  // Local development වලට (React නම්)
+    ],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true // ඔයා Login එකේදී cookies හෝ tokens පාවිච්චි කරනවා නම් මේක අනිවාර්යයි
+}));
 
 // Middleware 
 app.use(bodyParser.json());
