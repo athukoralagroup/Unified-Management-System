@@ -210,6 +210,7 @@ app.use('/api/rolling-room-sheet', rollingRouter);
 app.use('/api/firing-section', FiringRouter); 
 app.use('/api/hydro-meters', hydroMeterRouter);
 app.use('/api/pdf-totals', pdfTotalRouter);
+app.use('/api/tc5report', tc5router); 
 app.use('/api/tc5manualreport', tc5ManualReportRouter); 
 
 app.listen(3000, () => {
