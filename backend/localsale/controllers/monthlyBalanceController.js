@@ -51,35 +51,35 @@ export const getBalance = async (req, res) => {
         const { month } = req.query; // e.g., '2026-10'
         if (!month) return res.status(400).json({ success: false, message: 'Month required' });
 
+        // 💡 කෙලින්ම Database එකෙන් B/M Stock එක කියවීම
+        const monthlyRecord = await MonthlyBalance.findOne({ month: month });
+        
+        const bmMap = {};
         const allCategoriesMap = {};
 
-        // 1. Base categories load කිරීම
+        // 1. Base Categories ඇතුලත් කිරීම
         productCategories.forEach(cat => {
             const key = generateNormalizedKey(cat.categoryId, cat.name, cat.size);
             allCategoriesMap[key] = { categoryId: cat.categoryId, categoryTitle: cat.name, size: cat.size };
             bmMap[key] = 0;
         });
 
-        const bmMap = {};
-
-        // 💡 FIX: 
-        const bmRecord = await MonthlyBalance.findOne({ month: month });
-        
-        if (bmRecord && bmRecord.items) {
-            bmRecord.items.forEach(item => {
+        // 2. Database එකේ Save වී ඇති B/M Stock අගයන් කෙලින්ම ලබා ගැනීම
+        if (monthlyRecord && monthlyRecord.items) {
+            monthlyRecord.items.forEach(item => {
                 const key = generateNormalizedKey(item.categoryId, item.categoryTitle, item.size);
-                bmMap[key] = Number(item.bmStock) || 0; 
-                
                 if (!allCategoriesMap[key]) {
                     allCategoriesMap[key] = { categoryId: item.categoryId, categoryTitle: item.categoryTitle || item.categoryId, size: item.size };
                 }
                 bmMap[key] = Number(item.bmStock) || 0;
             });
         } else if (month === '2026-07') {
-            Object.keys(seed).forEach(k => { bmMap[k] = seed[k]; });
+            Object.keys(seed).forEach(k => {
+                if (allCategoriesMap[k]) bmMap[k] = seed[k];
+            });
         }
 
-        // 2. Load current month summaries (In/Out)
+        // 3. මේ මාසයට අදාල IN සහ OUT පමණක් ලබා ගැනීම (Total සහ Balance හැදීම සඳහා)
         const currentSummaries = await DailySummary.find({ date: { $regex: `^${month}` } });
         const currentIssues = await IssueSummary.find({ date: { $regex: `^${month}` } });
         const dynamicMap = {};
@@ -96,7 +96,18 @@ export const getBalance = async (req, res) => {
             });
         });
 
-        // 3. Load current month issues (Out)   
+        currentIssues.forEach(issue => {
+            issue.items?.forEach(item => {
+                const key = generateNormalizedKey(item.categoryId, item.categoryTitle, item.size);
+                if (!allCategoriesMap[key]) {
+                    allCategoriesMap[key] = { categoryId: item.categoryId, categoryTitle: item.categoryTitle || item.categoryId, size: item.size };
+                }
+                if (!dynamicMap[key]) dynamicMap[key] = { in: 0, out: 0 };
+                dynamicMap[key].out += (Number(item.out) || 0);
+            });
+        });
+
+        // 4. UI එකට දත්ත යැවීම
         const items = Object.keys(allCategoriesMap).map(key => {
             const catInfo = allCategoriesMap[key];
             const bmStock = bmMap[key] || 0; 
