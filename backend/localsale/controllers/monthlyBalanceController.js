@@ -45,71 +45,59 @@ const generateNormalizedKey = (catId, catTitle, size) => {
 };
 
 // @route   GET /api/monthly-balance
+// @route   GET /api/monthly-balance
 export const getBalance = async (req, res) => {
     try {
-        const { month } = req.query; // e.g., '2026-09'
+        const { month } = req.query; // e.g., '2026-10'
         if (!month) return res.status(400).json({ success: false, message: 'Month required' });
 
-        const bmMap = { ...seed };
+        const allCategoriesMap = {};
 
-        // Fetch past summaries
-        const pastSummaries = await DailySummary.find({ date: { $lt: `${month}-01` } });
-        
-        const allCategoriesMap = {}; // To store ALL categories (base + dynamic)
-
-        // 1. Add base categories first
+        // 1. Base categories load කිරීම
         productCategories.forEach(cat => {
             const key = generateNormalizedKey(cat.categoryId, cat.name, cat.size);
             allCategoriesMap[key] = { categoryId: cat.categoryId, categoryTitle: cat.name, size: cat.size };
         });
 
-        // 2. Process past summaries and catch any dynamic categories
-        pastSummaries.forEach(day => {
-            day.items?.forEach(item => {
+        const bmMap = {};
+
+        // 💡 FIX: මෙතැනින් තමයි Database එකේ සේව් වෙලා තියෙන සැබෑ Opening Balance එක (7 අගය) කෙලින්ම ගන්නේ
+        const bmRecord = await MonthlyBalance.findOne({ month: month });
+        
+        if (bmRecord && bmRecord.items) {
+            bmRecord.items.forEach(item => {
                 const key = generateNormalizedKey(item.categoryId, item.categoryTitle, item.size);
+                bmMap[key] = Number(item.bmStock) || 0; // 👈 Database එකේ 7 තිබ්බොත් 7 ම ගනී
                 
                 if (!allCategoriesMap[key]) {
-                    allCategoriesMap[key] = { 
-                        categoryId: item.categoryId, 
-                        categoryTitle: item.categoryTitle || item.categoryId, 
-                        size: item.size 
-                    };
-                }
-
-                if (bmMap[key] !== undefined) {
-                    bmMap[key] += (Number(item.in) || 0) - (Number(item.out) || 0);
-                } else {
-                    bmMap[key] = (Number(item.in) || 0) - (Number(item.out) || 0);
+                    allCategoriesMap[key] = { categoryId: item.categoryId, categoryTitle: item.categoryTitle || item.categoryId, size: item.size };
                 }
             });
-        });
+        } else if (month === '2026-07') {
+            // පළමු මාසය නම් seed එක භාවිතා කිරීම
+            Object.keys(seed).forEach(k => { bmMap[k] = seed[k]; });
+        }
 
+        // 2. Current month summaries (In/Out) load කිරීම (මේ මාසයේ ගනුදෙනු)
         const currentSummaries = await DailySummary.find({ date: { $regex: `^${month}` } });
         const dynamicMap = {};
 
-        // 3. Process current month summaries and catch any dynamic categories
         currentSummaries.forEach(day => {
             day.items?.forEach(item => {
                 const key = generateNormalizedKey(item.categoryId, item.categoryTitle, item.size);
-                
                 if (!allCategoriesMap[key]) {
-                    allCategoriesMap[key] = { 
-                        categoryId: item.categoryId, 
-                        categoryTitle: item.categoryTitle || item.categoryId, 
-                        size: item.size 
-                    };
+                    allCategoriesMap[key] = { categoryId: item.categoryId, categoryTitle: item.categoryTitle || item.categoryId, size: item.size };
                 }
-
                 if (!dynamicMap[key]) dynamicMap[key] = { in: 0, out: 0 };
                 dynamicMap[key].in += (Number(item.in) || 0);
                 dynamicMap[key].out += (Number(item.out) || 0);
             });
         });
 
-        // 4. Map over ALL collected categories instead of just the hardcoded productCategories
+        // 3. අවසාන දත්ත සකස් කිරීම
         const items = Object.keys(allCategoriesMap).map(key => {
             const catInfo = allCategoriesMap[key];
-            const bmStock = bmMap[key] || 0;
+            const bmStock = bmMap[key] || 0; // 👈 දැන් මෙතනට එන්නේ Database එකේ තියෙන සැබෑ අගයයි!
             const inQty = dynamicMap[key]?.in || 0;
             const outQty = dynamicMap[key]?.out || 0;
             
