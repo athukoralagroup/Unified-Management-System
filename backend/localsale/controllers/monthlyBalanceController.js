@@ -46,7 +46,6 @@ const generateNormalizedKey = (catId, catTitle, size) => {
 };
 
 // @route   GET /api/monthly-balance
-// @route   GET /api/monthly-balance
 export const getBalance = async (req, res) => {
     try {
         const { month } = req.query; // e.g., '2026-10'
@@ -63,13 +62,13 @@ export const getBalance = async (req, res) => {
 
         const bmMap = {};
 
-        // 💡 FIX: මෙතැනින් තමයි Database එකේ සේව් වෙලා තියෙන සැබෑ Opening Balance එක (7 අගය) කෙලින්ම ගන්නේ
+        // 💡 FIX: 
         const bmRecord = await MonthlyBalance.findOne({ month: month });
         
         if (bmRecord && bmRecord.items) {
             bmRecord.items.forEach(item => {
                 const key = generateNormalizedKey(item.categoryId, item.categoryTitle, item.size);
-                bmMap[key] = Number(item.bmStock) || 0; // 👈 Database එකේ 7 තිබ්බොත් 7 ම ගනී
+                bmMap[key] = Number(item.bmStock) || 0; 
                 
                 if (!allCategoriesMap[key]) {
                     allCategoriesMap[key] = { categoryId: item.categoryId, categoryTitle: item.categoryTitle || item.categoryId, size: item.size };
@@ -77,11 +76,10 @@ export const getBalance = async (req, res) => {
                 bmMap[key] = Number(item.bmStock) || 0;
             });
         } else if (month === '2026-07') {
-            // පළමු මාසය නම් seed එක භාවිතා කිරීම
             Object.keys(seed).forEach(k => { bmMap[k] = seed[k]; });
         }
 
-        // 2. Current month summaries (In/Out) load කිරීම (මේ මාසයේ ගනුදෙනු)
+        // 2. Load current month summaries (In/Out)
         const currentSummaries = await DailySummary.find({ date: { $regex: `^${month}` } });
         const currentIssues = await IssueSummary.find({ date: { $regex: `^${month}` } });
         const dynamicMap = {};
@@ -98,10 +96,10 @@ export const getBalance = async (req, res) => {
             });
         });
 
-        // 3. අවසාන දත්ත සකස් කිරීම
+        // 3. Load current month issues (Out)   
         const items = Object.keys(allCategoriesMap).map(key => {
             const catInfo = allCategoriesMap[key];
-            const bmStock = bmMap[key] || 0; // 👈 දැන් මෙතනට එන්නේ Database එකේ තියෙන සැබෑ අගයයි!
+            const bmStock = bmMap[key] || 0; 
             const inQty = dynamicMap[key]?.in || 0;
             const outQty = dynamicMap[key]?.out || 0;
             
