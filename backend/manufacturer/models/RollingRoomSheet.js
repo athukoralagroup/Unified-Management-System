@@ -23,7 +23,7 @@ const batchItemSchema = new mongoose.Schema({
   }
 }, { _id: false });
 
-// 💡 Navin Hydro Meter Readings sathi schema
+// 💡 Hydro Meter Readings සඳහා වන Schema එක (මෙය Chart දෙකටම පොදුයි)
 const hydroReadingSchema = new mongoose.Schema({
   time: { type: String, default: '' },
   dryBulb: { type: String, default: '' },
@@ -80,8 +80,9 @@ const rollingRoomSheetSchema = new mongoose.Schema({
   },
   batches: [batchItemSchema],
   
-  // 💡 Frontend madhun yenara hydroReadings array save karnyashati navin field
-  hydroReadings: [hydroReadingSchema],
+  // 💡 NEW: Frontend එකෙන් එවන Hydro Charts 2කේ දත්ත වෙන වෙනම Save කරගැනීම සඳහා
+  rollingHydroReadings: [hydroReadingSchema],
+  fermentationHydroReadings: [hydroReadingSchema],
 
   enteredBy: {
     type: String,
