@@ -80,7 +80,6 @@ const rollingRoomSheetSchema = new mongoose.Schema({
   },
   batches: [batchItemSchema],
   
-  // 💡 NEW: Frontend එකෙන් එවන Hydro Charts 2කේ දත්ත වෙන වෙනම Save කරගැනීම සඳහා
   rollingHydroReadings: [hydroReadingSchema],
   fermentationHydroReadings: [hydroReadingSchema],
 
