@@ -23,7 +23,7 @@ const ISSUE_TYPES = [
 ];
 
 export default function IssueTypeSummaryView() {
-  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
+  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
 
   // --- ROLE BASED ACCESS ---
   const userRole = localStorage.getItem("userRole") || localStorage.getItem("role") || "";
@@ -44,10 +44,10 @@ export default function IssueTypeSummaryView() {
   const fetchSummary = async () => {
     setIsLoading(true);
     try {
-      const token = localStorage.getItem("token"); // 👈 Token එක ලබා ගැනීම
+      const token = localStorage.getItem("token"); 
       const response = await fetch(`${BACKEND_URL}/api/issue-summary?date=${date}`, {
         headers: {
-          'Authorization': `Bearer ${token}` // 👈 Token එක යැවීම
+          'Authorization': `Bearer ${token}`
         }
       });      
       const result = await response.json();
@@ -139,7 +139,7 @@ export default function IssueTypeSummaryView() {
     const toastId = toast.loading("Deleting record...");
     
     try {
-        const token = localStorage.getItem("token"); // 👈 Token එක ලබා ගැනීම
+        const token = localStorage.getItem("token");
         const promises = [];
         for (const type of ISSUE_TYPES) {
             const typeData = rowToDelete.types[type];
@@ -147,7 +147,7 @@ export default function IssueTypeSummaryView() {
                 promises.push(fetch(`${BACKEND_URL}/api/issue-summary/${typeData.recordId}/item/${typeData.itemId}`, {
                     method: 'DELETE',
                     headers: {
-                      'Authorization': `Bearer ${token}` // 👈 Token එක යැවීම
+                      'Authorization': `Bearer ${token}` 
                     }
                 }));
             }
@@ -178,7 +178,7 @@ export default function IssueTypeSummaryView() {
     const toastId = toast.loading("Updating record...");
     
     try {
-        const token = localStorage.getItem("token"); // 👈 Token එක ලබා ගැනීම
+        const token = localStorage.getItem("token"); 
         const promises = [];
         for (const type of ISSUE_TYPES) {
             const typeData = editingItem.types[type];
@@ -187,7 +187,7 @@ export default function IssueTypeSummaryView() {
                     method: 'PUT',
                     headers: { 
                       'Content-Type': 'application/json',
-                      'Authorization': `Bearer ${token}` // 👈 Token එක යැවීම
+                      'Authorization': `Bearer ${token}` 
                     },
                     body: JSON.stringify({ out: Number(typeData.value), editedBy: username })
                 }));
@@ -258,7 +258,7 @@ export default function IssueTypeSummaryView() {
             uniqueCode={`ISU-${date.replace(/-/g, '')}`}
             disabled={isLoading || summaryData.length === 0}
           />
-          <PDFDownloader
+          {/* <PDFDownloader
             isWhatsApp={true}
             title="Daily Issue Summary"
             subtitle={`Records for ${date}`}
@@ -268,7 +268,7 @@ export default function IssueTypeSummaryView() {
             orientation="landscape"
             uniqueCode={`ISU-${date.replace(/-/g, '')}`}
             disabled={isLoading || summaryData.length === 0}
-          />
+          /> */}
           <button 
             onClick={fetchSummary}
             disabled={isLoading}

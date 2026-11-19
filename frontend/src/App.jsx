@@ -7,6 +7,10 @@ import { HandmadeRoutes } from './pages/HandmadeRoutes';
 import { PackingRoutes } from './pages/PackingRoutes';
 import FactoryRouter from './pages/FactoryRouter';
 import LocalSaleRouter from './pages/LocalSaleRouter';
+import ManufacturerRouter from './pages/ManufacturerRouter';
+import AdminSettings from './pages/Admin/AdminSettings';
+import SystemUpdates from './pages/systerm update/SystemUpdates';
+import DeveloperSection from './pages/systerm update/DeveloperSection';
 
 const PUBLIC_VAPID_KEY = import.meta.env.VITE_PUBLIC_VAPID_KEY;
 
@@ -24,6 +28,17 @@ function urlBase64ToUint8Array(base64String) {
 const ProtectedRoute = () => {
   const token = localStorage.getItem('token');
   return token ? <Outlet /> : <Navigate to="/login" replace />;
+};
+
+const DeveloperRoute = () => {
+  const token = localStorage.getItem('token');
+  const role = localStorage.getItem('userRole') || localStorage.getItem('role');
+  if (!token) return <Navigate to="/login" replace />;
+  if (role !== 'Developer') {
+    toast.error("Access Denied. Restricted to Developers only.");
+    return <Navigate to="/" replace />;
+  }
+  return <Outlet />;
 };
 
 export default function App() {
@@ -47,19 +62,17 @@ export default function App() {
           applicationServerKey: urlBase64ToUint8Array(PUBLIC_VAPID_KEY)
         });
 
-        // 🌟 අලුත් වෙනස 1: LocalStorage එකෙන් ලොග් වෙලා ඉන්න කෙනාගේ Role එක ගැනීම 
         const userRole = localStorage.getItem('userRole') || 'Unknown';
 
-        // 🌟 අලුත් වෙනස 2: Subscription එකට Role එකයි Section එකයි එකතු කිරීම
         const payload = {
-          ...subscription.toJSON(), // Subscription විස්තර ටික දිගහැරීම
-          role: userRole,           // User ගේ Role එක (උදා: "Packing Officer")
-          section: "Packing"        // අදාල අංශය 
+          ...subscription.toJSON(), 
+          role: userRole,           
+          section: "Packing"        
         };
 
         await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/notifications/subscribe`, {
           method: 'POST',
-          body: JSON.stringify(payload), // 🌟 අලුත් වෙනස 3: කලින් යැව්ව subscription වෙනුවට අලුත් payload එක යැවීම
+          body: JSON.stringify(payload), 
           headers: { 'content-type': 'application/json' }
         });
 
@@ -98,13 +111,21 @@ export default function App() {
         {/* Public */}
         <Route path="/login" element={<Login />} />
         <Route path="/" element={<Login />} />
-
         {/* Protected */}
         <Route element={<ProtectedRoute />}>
+          <Route path="/admin/settings" element={<AdminSettings />} />
+          
+          {/* Developer Only Routes */}
+          <Route element={<DeveloperRoute />}>
+            <Route path="/developer-section" element={<DeveloperSection />} />
+            <Route path="/system-updates" element={<SystemUpdates />} />
+          </Route>
+          
           {HandmadeRoutes()}
           {PackingRoutes()}
           {FactoryRouter()}
           {LocalSaleRouter()}
+          {ManufacturerRouter()}
         </Route>
       </Routes>
     </BrowserRouter>

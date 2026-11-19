@@ -17,6 +17,15 @@ import {
   PackagePlus,
   Proportions,
   Search,
+  Leaf,
+  Truck,
+  UsersRound,
+  PackageCheck,
+  LayoutGrid,  
+  Package, 
+  Factory,
+  ClipboardList,
+  Settings, 
 } from 'lucide-react';
 
 // --- SHADCN COMPONENTS ---
@@ -61,6 +70,7 @@ import {
   SidebarMenuSubButton,
 } from '@/components/ui/sidebar';
 import { useIsMobile } from '@/hooks/use-mobile';
+import toast from 'react-hot-toast';
 
 // --- NEW ROLE-BASED DATA CONFIGURATION ---
 const DATA = {
@@ -74,25 +84,41 @@ const DATA = {
   ],
   navMain: [
     {
-      title: 'Factory Balance',
-      icon: Store,
+      title: 'Daily Green Leaf',
+      icon: Leaf,
       items: [
-        { title: 'Daily Production', url: '/factory/dailyproduction', nonViewer: true },
-        { title: 'Dispatch And Return', url: '/factory/dispatchandreturn', nonViewer: true },
-        { title: 'Labour Output', url: '/factory/labouroutput', nonViewer: true },
-        { title: 'Factory Packing', url: '/factory/factorypacking', nonViewer: true }
+        { title: 'Enter Daily G/L', url: '/factory/dailyproduction', nonViewer: true },
+        { title: 'View Daily G/L', url: '/factory/view' },
+
       ],
     },
     {
-      title: 'Summary Reports',
-      icon: LineChart,
+      title: 'Dispatch And Return',
+      icon: Truck,
       items: [
-        { title: 'Factory Log View', url: '/factory/view' },
-        { title: 'Dispatch Records', url: '/factory/dispatchrecords' },
-        { title: 'Labour Output List', url: '/factory/labouroutputlist' },
-        { title: 'Packing Summary', url: '/factory/packingsummary' }
+        { title: 'Enter Dispatch & Return', url: '/factory/dispatchandreturn', nonViewer: true },
+        { title: 'View Dispatch Records', url: '/factory/dispatchrecords' },
+        { title: 'Dispatch Dashboard', url: '/factory/dispatchdashboard' }
+
       ],
     },
+    {
+      title: 'Labour Output',
+      icon: UsersRound,
+      items: [
+        { title: 'Enter Labour Output', url: '/factory/labouroutput', nonViewer: true },
+        { title: 'View Labour Output', url: '/factory/labouroutputlist' },
+      ],
+    },
+    {
+      title: 'Packing Materials',
+      icon: PackageCheck,
+      items: [
+        { title: 'Enter Packing Materials', url: '/factory/factorypacking', nonViewer: true },
+        { title: 'View Packing Summary', url: '/factory/packingsummary' }
+      ],
+    },
+
   ],
 };
 
@@ -104,36 +130,14 @@ export default function FactoryDashboardLayout() {
   // --- SEARCH BAR STATE ---
   const [searchQuery, setSearchQuery] = React.useState('');
 
-  // --- SIDEBAR HOVER & DELAY LOGIC ---
+  // --- SIDEBAR STATE LOGIC ---
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(true);
-  const sidebarTimeoutRef = React.useRef(null);
 
   React.useEffect(() => {
     if (isMobile) {
       setIsSidebarOpen(false);
     }
   }, [isMobile]);
-
-  const handleSidebarMouseEnter = () => {
-    if (isMobile) return;
-    if (sidebarTimeoutRef.current) {
-      clearTimeout(sidebarTimeoutRef.current);
-    }
-    setIsSidebarOpen(true);
-  };
-
-  const handleSidebarMouseLeave = () => {
-    if (isMobile) return;
-    sidebarTimeoutRef.current = setTimeout(() => {
-      setIsSidebarOpen(false);
-    }, 100);
-  };
-
-  React.useEffect(() => {
-    return () => {
-      if (sidebarTimeoutRef.current) clearTimeout(sidebarTimeoutRef.current);
-    };
-  }, []);
 
   // --- THEME STATE LOGIC ---
   const [isDark, setIsDark] = React.useState(false);
@@ -163,11 +167,91 @@ export default function FactoryDashboardLayout() {
   // --- AUTHENTICATION LOGIC ---
   const currentUsername = localStorage.getItem('username') || 'Unknown User';
   const currentUserRole = localStorage.getItem('userRole') || localStorage.getItem('role') || 'User';
+  
+  // 💡 NEW: LocalStorage එකෙන් Allowed Paths ලබාගැනීම
+  let allowedPaths = [];
+  try {
+    allowedPaths = JSON.parse(localStorage.getItem('allowedPaths')) || [];
+  } catch (e) {
+    allowedPaths = [];
+  }
+
+  // 💡 NEW: SYSTEM MODULES DEFINITION
+  const systemModules = [
+    { id: 'handmade', name: 'H/T Factory Section', icon: Leaf, path: '/dashboard' },
+    { id: 'packing', name: 'Packing Section', icon: Package, path: '/packing' },
+    { id: 'factory', name: 'Factory Section', icon: Factory, path: '/factory' },
+    { id: 'localSale', name: 'Local Sale Section', icon: Store, path: '/localsale' },
+    { id: 'manufacturer', name: 'Manufacturing Section', icon: ClipboardList, path: '/manufacturer' },
+    { id: 'admin', name: 'Admin Settings', icon: Settings, path: '/admin/settings' },
+  ];
+
+  // 💡 Filter the modules based on allowedPaths from localStorage
+  const accessibleModules = systemModules.filter(mod => allowedPaths.includes(mod.id));
+  
+  // 💡 Determine the current module based on the current path
+  const currentModule = accessibleModules.find(mod => location.pathname.startsWith(mod.path)) || accessibleModules[0];
 
   const handleLogout = () => {
-    localStorage.clear(); // Clear all auth data
+    localStorage.clear();
     navigate('/', { replace: true });
   };
+
+  // 💡 NEW: AUTO LOGOUT LOGIC (Token Expiration Check)
+  React.useEffect(() => {
+    const checkTokenExpiry = () => {
+      const token = localStorage.getItem('token');
+      
+      if (!token) {
+        handleAutoLogout();
+        return;
+      }
+
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        const expiryTime = payload.exp * 1000; 
+        const currentTime = Date.now();
+
+        if (currentTime >= expiryTime) {
+          handleAutoLogout();
+        } else {
+          const timeRemaining = expiryTime - currentTime;
+          
+          const timeoutId = setTimeout(() => {
+            handleAutoLogout();
+          }, timeRemaining);
+
+          return () => clearTimeout(timeoutId); // Cleanup function
+        }
+      } catch (error) {
+        console.error("Invalid token format", error);
+        handleAutoLogout();
+      }
+    };
+
+    const handleAutoLogout = () => {
+      localStorage.clear();
+      toast.error("Session Expired. Please login again.");
+      navigate('/', { replace: true });
+    };
+
+    checkTokenExpiry();
+  }, [navigate]);
+
+  
+
+  // 💡 NEW: URL-BASED ACCESS CONTROL (get allowedPages)
+  const allowedPages = React.useMemo(() => {
+    try { return JSON.parse(localStorage.getItem('allowedPages')) || []; } 
+    catch { return []; }
+  }, []);
+
+  // 💡 NEW: check access to a specific URL based on allowedPages
+  const hasAccess = React.useCallback((url) => {
+    if (currentUserRole === 'Admin' || currentUserRole === 'Developer') return true; // Admin and Developer have access to everything
+    if (!url) return false;
+    return allowedPages.includes(url);
+  }, [currentUserRole, allowedPages]);
 
   // --- CUSTOM BREADCRUMB FALLBACK LOGIC ---
   const getCustomBreadcrumbTitle = (path) => {
@@ -227,49 +311,51 @@ export default function FactoryDashboardLayout() {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
   });
 
-  // --- SEARCH FILTERING LOGIC ---
+  // --- 💡 SEARCH FILTERING & GRANULAR ACCESS LOGIC ---
   const accessibleLinks = React.useMemo(() => {
-    return [
-      ...DATA.quickLinks.map(link => ({ title: link.name, url: link.url, icon: link.icon })),
-      ...DATA.navMain.flatMap(group =>
-        group.items
-          .filter(item => !(item.adminOnly && currentUserRole !== 'Admin')) // Filter admin paths
-          .filter(item => !(item.nonViewer && currentUserRole === 'Viewer')) // Hide from viewers
-          .map(item => ({ title: item.title, url: item.url, icon: group.icon }))
-      )
-    ];
-  }, [currentUserRole]);
+    const links = [...DATA.quickLinks.map(link => ({ title: link.name, url: link.url, icon: link.icon }))];
+    
+    DATA.navMain.forEach(group => {
+      group.items.forEach(item => {
+        if (item.items) {
+          item.items.forEach(lvl2 => {
+            if (!hasAccess(lvl2.url)) return; // 👈 Access Check (Level 2)
+            links.push({ title: `${item.title} - ${lvl2.title}`, url: lvl2.url, icon: group.icon });
+          });
+        } else {
+          if (!hasAccess(item.url)) return; // 👈 Access Check (Level 1)
+          links.push({ title: item.title, url: item.url, icon: group.icon });
+        }
+      });
+    });
+    return links;
+  }, [hasAccess]);
 
-  const filteredQuickLinks = DATA.quickLinks.filter(item =>
-    item.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const searchResults = searchQuery
-    ? accessibleLinks.filter(link => link.title.toLowerCase().includes(searchQuery.toLowerCase()))
-    : [];
+  const filteredQuickLinks = DATA.quickLinks.filter(item => item.name.toLowerCase().includes(searchQuery.toLowerCase()));
+  
+  const searchResults = searchQuery ? accessibleLinks.filter(link => link.title.toLowerCase().includes(searchQuery.toLowerCase())) : [];
 
   const filteredNavMain = DATA.navMain.map(group => {
-    const visibleItems = group.items.filter(subItem => {
-        // Admin Only ඒවා Admin ට විතරයි
-        if (subItem.adminOnly && currentUserRole !== 'Admin') return false;
-        
-        // nonViewer දාලා තියෙන ඒවා Viewer ට පෙන්වන්නේ නෑ
-        if (subItem.nonViewer && currentUserRole === 'Viewer') return false; 
-        
-        return true;
-    });
-
     const matchesGroupTitle = group.title.toLowerCase().includes(searchQuery.toLowerCase());
+    
+    const filteredLevel1 = group.items.map(subItem => {
+      if (subItem.items) {
+        // Level 2
+        const filteredLevel2 = subItem.items.filter(lvl2 => {
+          if (!hasAccess(lvl2.url)) return false; // 👈 Access Check
+          return matchesGroupTitle || subItem.title.toLowerCase().includes(searchQuery.toLowerCase()) || lvl2.title.toLowerCase().includes(searchQuery.toLowerCase());
+        });
+        if (filteredLevel2.length > 0) return { ...subItem, items: filteredLevel2 };
+        return null;
+      } else {
+        // Level 1
+        if (!hasAccess(subItem.url)) return null; // 👈 Access Check
+        const matchesItem = matchesGroupTitle || subItem.title.toLowerCase().includes(searchQuery.toLowerCase());
+        return matchesItem ? subItem : null;
+      }
+    }).filter(Boolean);
 
-    const searchFilteredItems = visibleItems.filter(subItem =>
-      matchesGroupTitle || subItem.title.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-
-    return {
-      ...group,
-      items: searchFilteredItems,
-      isSearchMatch: matchesGroupTitle || searchFilteredItems.length > 0
-    };
+    return { ...group, items: filteredLevel1, isSearchMatch: matchesGroupTitle || filteredLevel1.length > 0 };
   }).filter(group => group.isSearchMatch && group.items.length > 0);
 
   return (
@@ -278,8 +364,6 @@ export default function FactoryDashboardLayout() {
         <Sidebar
           collapsible="icon"
           className="border-none !bg-[#F4F7F5] dark:!bg-zinc-950 !opacity-100 z-[60] transition-[width] duration-300 ease-in-out"
-          onMouseEnter={handleSidebarMouseEnter}
-          onMouseLeave={handleSidebarMouseLeave}
         >
 
           <SidebarHeader className="pt-6 pb-2 px-4">
@@ -475,6 +559,48 @@ export default function FactoryDashboardLayout() {
 
             <div className="flex items-center gap-2 sm:gap-4 md:mr-2">
               <p className="hidden md:block text-sm font-medium p-4 dark:text-white">{today}</p>
+
+              {/* 💡 NEW: MODULE SWITCHER UI  */}
+              {accessibleModules.length > 1 && (
+                <>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger className="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-zinc-800/50 hover:bg-gray-100 dark:hover:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-xl transition-all focus:outline-none group">
+                      <LayoutGrid size={18} className="text-gray-600 dark:text-gray-300 group-hover:text-[#3f6212] dark:group-hover:text-lime-500 transition-colors" />
+                      <span className="hidden lg:block text-sm font-bold text-gray-700 dark:text-gray-200">
+                        {currentModule?.name || 'Switch Section'}
+                      </span>
+                      <ChevronDown size={14} className="text-gray-400" />
+                    </DropdownMenuTrigger>
+                    
+                    <DropdownMenuContent 
+                      className="w-56 rounded-2xl bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl border border-gray-100 dark:border-zinc-800 shadow-xl p-2 mt-2 z-[70]" 
+                      align="end"
+                    >
+                      <DropdownMenuLabel className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1 px-2">
+                        System Sections
+                      </DropdownMenuLabel>
+                      
+                      {accessibleModules.map((mod) => (
+                        <DropdownMenuItem
+                          key={mod.id}
+                          onClick={() => {
+                            if (currentModule?.id !== mod.id) navigate(mod.path);
+                          }}
+                          className={`cursor-pointer rounded-xl py-3 mb-1 font-medium flex items-center transition-colors ${
+                            currentModule?.id === mod.id 
+                              ? 'bg-[#84cc16]/10 text-[#3f6212] dark:bg-lime-500/10 dark:text-lime-400 pointer-events-none'
+                              : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-zinc-800'
+                          }`}
+                        >
+                          <mod.icon className="mr-3 h-4 w-4" /> {mod.name}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+
+                  <Separator orientation="vertical" className="h-6 bg-gray-200 dark:bg-zinc-700 hidden sm:block" />
+                </>
+              )}
 
               <button
                 onClick={toggleTheme}

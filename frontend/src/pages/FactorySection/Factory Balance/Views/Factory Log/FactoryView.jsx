@@ -120,23 +120,33 @@ export default function FactoryView() {
           mtToDate = 0;
         }
 
-        const glToday = record.greenLeaf?.today || record.greenLeafToday || 0;
-        const mtToday = record.madeTea?.today || record.madeTeaToday || 0;
+        const estate = record.greenLeaf?.estateLeaf?.today || 0;
+        const brought = record.greenLeaf?.broughtLeaf?.today || 0;
+        const legacyToday = record.greenLeaf?.today || record.greenLeafToday || 0;
+        
+        const totalToday = record.greenLeaf?.totalToday || (estate + brought > 0 ? estate + brought : legacyToday);
+        
+        const totalToDate = record.madeTea?.today || record.madeTeaToday || 0;
         const disp = record.dispatch || 0;
         const loc = record.localSaleAndGratis || 0;
         const ret = record.returnAmount || 0;
 
         const tOut = disp + loc;
 
-        glToDate += glToday;
-        mtToDate += mtToday;
+        glToDate += totalToday;
+        mtToDate += totalToDate;
 
-        runningBalance = runningBalance + mtToday - tOut + ret;
+        runningBalance = runningBalance + totalToDate - tOut + ret;
 
         return {
           ...record,
-          greenLeaf: { today: glToday, toDate: glToDate },
-          madeTea: { today: mtToday, toDate: mtToDate },
+          greenLeaf: { 
+              today: totalToday, 
+              toDate: glToDate,
+              estate: estate, // 💡 අලුත්: View එකේ පෙන්වීම සඳහා
+              brought: brought 
+          },
+          madeTea: { today: totalToDate, toDate: mtToDate },
           dispatch: disp,
           localSaleAndGratis: loc,
           totalOut: tOut,
@@ -144,7 +154,6 @@ export default function FactoryView() {
           factoryBalance: runningBalance,
           isEdited: record.isEdited || false,
           editedBy: record.editedBy || "",
-          // Backend එකෙන් එන daysToZero එක කෙලින්ම ගන්නවා
           daysToZero: record.daysToZero || 0,
         };
       });
@@ -163,7 +172,7 @@ export default function FactoryView() {
   const totalMadeTea = records.reduce((sum, r) => sum + (r.madeTea?.today || 0), 0);
   const totalDispatch = records.reduce((sum, r) => sum + (r.dispatch || 0), 0);
   const totalLocalSale = records.reduce((sum, r) => sum + (r.localSaleAndGratis || 0), 0);
-
+  const totalOutPeriod = totalDispatch + totalLocalSale;
   const dispatchOutTurn = totalMadeTea > 0 ? ((totalDispatch / totalMadeTea) * 100).toFixed(2) : "0.00";
   const localSalePercentage = totalMadeTea > 0 ? ((totalLocalSale / totalMadeTea) * 100).toFixed(2) : "0.00";
 
@@ -429,7 +438,7 @@ export default function FactoryView() {
             Factory Logs View
           </h2>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Master overview of Green Leaf, Production & Dispatch records with Factory Balance calculations.
+            Detailed view of Green Leaf, Production & Dispatch records with Factory Balance.
           </p>
         </div>
 
@@ -440,7 +449,6 @@ export default function FactoryView() {
             className="px-4 py-2 h-[42px] bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-md text-sm font-semibold flex items-center gap-2 shadow-sm transition-all"
           >
             <RefreshCcw size={18} className={loading ? "animate-spin" : ""} />{" "}
-            Refresh
           </button>
 
           <button
@@ -800,35 +808,44 @@ export default function FactoryView() {
                             </div>
                           </td>
 
-                          <td className="px-3 py-3 border-r border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-200">
-                            {(record.greenLeaf?.today || 0).toFixed(2)}
+                          <td className="px-3 py-3 border-r border-gray-200 dark:border-gray-700 align-middle">
+                            <div className="flex flex-col items-center justify-center">
+                              <span className="font-bold text-gray-900 dark:text-gray-200">
+                                {(record.greenLeaf?.today || 0).toFixed(2)}
+                              </span>
+                              {((record.greenLeaf?.estate > 0) || (record.greenLeaf?.brought > 0)) && (
+                                <span className="text-[9px] text-gray-500 mt-0.5 whitespace-nowrap">
+                                  E: {(record.greenLeaf.estate).toFixed(1)} | B: {(record.greenLeaf.brought).toFixed(1)}
+                                </span>
+                              )}
+                            </div>
                           </td>
-                          <td className="px-3 py-3 border-r border-gray-300 dark:border-gray-700 font-medium text-gray-900 dark:text-gray-200">
+                          <td className="px-3 py-3 border-r border-gray-300 dark:border-gray-700 font-medium text-gray-900 dark:text-gray-200 align-top pt-3.5">
                             {(record.greenLeaf?.toDate || 0).toFixed(2)}
                           </td>
 
-                          <td className="px-3 py-3 border-r border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-200">
+                          <td className="px-3 py-3 border-r border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-200 align-top pt-3.5">
                             {(record.madeTea?.today || 0).toFixed(2)}
                           </td>
-                          <td className="px-3 py-3 border-r border-gray-300 dark:border-gray-700 font-medium text-gray-900 dark:text-gray-200">
+                          <td className="px-3 py-3 border-r border-gray-300 dark:border-gray-700 font-medium text-gray-900 dark:text-gray-200 align-top pt-3.5">
                             {(record.madeTea?.toDate || 0).toFixed(2)}
                           </td>
 
-                          <td className="px-3 py-3 border-r border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400">
+                          <td className="px-3 py-3 border-r border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 align-top pt-3.5">
                             {(record.dispatch || 0) === 0
                               ? "-"
                               : record.dispatch.toFixed(2)}
                           </td>
-                          <td className="px-3 py-3 border-r border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-400">
+                          <td className="px-3 py-3 border-r border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-400 align-top pt-3.5">
                             {(record.localSaleAndGratis || 0) === 0
                               ? "-"
                               : record.localSaleAndGratis.toFixed(2)}
                           </td>
 
-                          <td className="px-3 py-3 border-r border-gray-300 dark:border-gray-700 font-bold text-gray-800 dark:text-gray-200 bg-orange-50/30 dark:bg-orange-900/20">
+                          <td className="px-3 py-3 border-r border-gray-300 dark:border-gray-700 font-bold text-gray-800 dark:text-gray-200 bg-orange-50/30 dark:bg-orange-900/20 align-top pt-3.5">
                             {(record.totalOut || 0).toFixed(2)}
                           </td>
-                          <td className="px-3 py-3 border-r border-gray-300 dark:border-gray-700 text-red-600 dark:text-red-400">
+                          <td className="px-3 py-3 border-r border-gray-300 dark:border-gray-700 text-red-600 dark:text-red-400 align-top pt-3.5">
                             {(record.returnAmount || 0) === 0
                               ? "-"
                               : record.returnAmount.toFixed(2)}
@@ -855,7 +872,7 @@ export default function FactoryView() {
                             </div>
                           </td>
 
-                          <td className="px-3 py-3 text-center">
+                          <td className="px-3 py-3 text-center align-top pt-2">
                             <div className="flex items-center justify-center gap-1">
                               <button
                                 onClick={() => handleEditClick(record)}
@@ -920,12 +937,12 @@ export default function FactoryView() {
 
                     <tr className="bg-orange-50 dark:bg-orange-900/20 font-bold border-t-2 border-orange-200 dark:border-orange-800/50">
                       <td colSpan="7" className="px-4 py-4 border-r border-gray-300 dark:border-gray-700 text-right text-orange-800 dark:text-orange-400 uppercase tracking-wider">
-                        Total Dispatch For Period:
+                        Total Outgoing For Period:
                       </td>
-                      <td className="px-3 py-4 border-r border-gray-300 dark:border-gray-700 text-orange-700 dark:text-orange-300 text-lg bg-orange-100 dark:bg-orange-900/40">
-                        {totalDispatch > 0 ? totalDispatch.toFixed(2) : "-"}
+                      <td className="px-3 py-4 border-r border-gray-300 dark:border-gray-700 text-orange-700 dark:text-orange-300 text-lg bg-orange-100 dark:bg-orange-900/40 font-black">
+                        {totalOutPeriod > 0 ? totalOutPeriod.toFixed(2) : "-"}
                       </td>
-                      <td colSpan="5" className="px-3 py-4 bg-gray-50 dark:bg-gray-800/50"></td>
+                      <td colSpan="3" className="px-3 py-4 bg-gray-50 dark:bg-gray-800/50"></td>
                     </tr>
 
                   </>

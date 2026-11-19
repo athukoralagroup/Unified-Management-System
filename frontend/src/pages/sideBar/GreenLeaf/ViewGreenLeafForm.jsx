@@ -87,7 +87,7 @@ export default function GreenLeafForm() {
   const userRole = localStorage.getItem("userRole") || "";
   const isViewer =
     userRole.toLowerCase() === "viewer" || userRole.toLowerCase() === "view";
-  const isAdmin = userRole.toLowerCase() === "admin";
+  const isAdmin = userRole.toLowerCase() === "admin" || userRole.toLowerCase() === "developer";
 
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -155,8 +155,6 @@ export default function GreenLeafForm() {
           const prod = prodsForDate[i] || null;
           const lab = labsForDate[i] || null;
 
-          // --- Updated Logic for Edit Detection ---
-          // ඇත්තටම Edit කරලද කියලා බලන්නේ 'updatedBy' field එකේ නමක් තියෙනවද කියලා චෙක් කරලා
           const hasUpdater = (item) =>
             item && item.updatedBy && item.updatedBy.trim() !== "";
 
@@ -188,7 +186,6 @@ export default function GreenLeafForm() {
               });
 
             if (times.length > 0) {
-              // අලුත්ම update එක කරපු වෙලාව සහ කෙනා තෝරාගැනීම
               times.sort((a, b) => b.time - a.time);
               lastUpdatedDate = new Date(times[0].time)
                 .toISOString()
@@ -196,7 +193,6 @@ export default function GreenLeafForm() {
               editedBy = times[0].user;
             }
           }
-          // ----------------------------------------
 
           let rType = "M/R";
           if (lab && lab.rollingType) {
@@ -219,6 +215,7 @@ export default function GreenLeafForm() {
             selectedWeight: gl ? gl.selectedWeight : 0,
             returnedWeight: gl ? gl.returnedWeight : 0,
             teaType: prod ? prod.teaType || "-" : "-",
+            selectedTeaWeight: prod ? prod.selectedTeaWeight || 0 : 0,
             madeTeaWeight: prod ? prod.madeTeaWeight || 0 : 0,
             dryerName: prod?.dryerDetails?.dryerName || "-",
             meterStart: prod?.dryerDetails?.meterStart ?? "-",
@@ -251,20 +248,16 @@ export default function GreenLeafForm() {
 
   const filteredRecords = records.filter((record) => {
     const recordMonth = record.date.slice(0, 7); // YYYY-MM
-
     const monthMatch = !filterMonth || recordMonth === filterMonth;
-
     const dateMatch =
       (!startDate || record.date >= startDate) &&
       (!endDate || record.date <= endDate);
-
     const typeMatch = teaType === "All" || record.teaType === teaType;
     const dryerMatch = dryerType === "All" || record.dryerName === dryerType;
 
     return monthMatch && dateMatch && typeMatch && dryerMatch;
   });
 
-  // --- GROUP BY DATE LOGIC FOR UI DISPLAY ---
   const groupedRecordsByDate = filteredRecords.reduce((acc, record) => {
     if (!acc[record.date]) {
       acc[record.date] = [];
@@ -289,7 +282,6 @@ export default function GreenLeafForm() {
     }
   });
 
-  // -------- මේ අලුත් කොටස මෙතැනට එකතු කරන්න --------
   // Calculate Grouped OutTurn % (By Date and Tea Type)
   const outTurnGroups = {};
   filteredRecords.forEach((r) => {
@@ -298,19 +290,21 @@ export default function GreenLeafForm() {
       if (!outTurnGroups[key]) {
         outTurnGroups[key] = { selectedSum: 0, madeTeaSum: 0 };
       }
-      outTurnGroups[key].selectedSum += Number(r.selectedWeight) || 0;
+      
+      // BACKWARD COMPATIBILITY FALLBACK: 
+      // If selectedTeaWeight is 0 (old data), fall back to the overall selectedWeight
+      const weightToUse = Number(r.selectedTeaWeight) > 0 ? Number(r.selectedTeaWeight) : Number(r.selectedWeight);
+      
+      outTurnGroups[key].selectedSum += weightToUse || 0;
       outTurnGroups[key].madeTeaSum += Number(r.madeTeaWeight) || 0;
     }
   });
 
+  // Highlight colors updated to gray for shared dryers
   const highlightColors = [
-    { ui: "bg-green-200/80 dark:bg-green-900/40", pdf: "#bbf7d0" },
-    { ui: "bg-yellow-200/80 dark:bg-yellow-900/40", pdf: "#fef08a" },
-    { ui: "bg-purple-200/80 dark:bg-purple-900/40", pdf: "#e9d5ff" },
-    { ui: "bg-blue-200/80 dark:bg-blue-900/40", pdf: "#bfdbfe" },
-    { ui: "bg-pink-200/80 dark:bg-pink-900/40", pdf: "#fbcfe8" },
-    { ui: "bg-orange-200/80 dark:bg-orange-900/40", pdf: "#fed7aa" },
+    { ui: "bg-gray-100 dark:bg-zinc-800/40", pdf: "#f3f4f6" },
   ];
+  
   let colorIndex = 0;
 
   Object.keys(groupMap).forEach((key) => {
@@ -322,36 +316,20 @@ export default function GreenLeafForm() {
     }
   });
 
-  const totalGL = filteredRecords.reduce(
-    (sum, r) => sum + (Number(r.totalWeight) || 0),
-    0,
-  );
-  const totalSelectedGL = filteredRecords.reduce(
-    (sum, r) => sum + (Number(r.selectedWeight) || 0),
-    0,
-  );
-  const totalReturnedGL = filteredRecords.reduce(
-    (sum, r) => sum + (Number(r.returnedWeight) || 0),
-    0,
-  );
-  const totalMadeTea = filteredRecords.reduce(
-    (sum, r) => sum + (Number(r.madeTeaWeight) || 0),
-    0,
-  );
-  const totalSelectionLabour = filteredRecords.reduce(
-    (sum, r) => sum + (Number(r.workerCount) || 0),
-    0,
-  );
-  const totalHandRollingLabour = filteredRecords.reduce(
-    (sum, r) => sum + (Number(r.rollingWorkerCount) || 0),
-    0,
-  );
+  const totalGL = filteredRecords.reduce((sum, r) => sum + (Number(r.totalWeight) || 0), 0);
+  const totalSelectedGL = filteredRecords.reduce((sum, r) => sum + (Number(r.selectedWeight) || 0), 0);
+  const totalReturnedGL = filteredRecords.reduce((sum, r) => sum + (Number(r.returnedWeight) || 0), 0);
+  
+  const totalSelectedTeaWeight = filteredRecords.reduce((sum, r) => sum + (Number(r.selectedTeaWeight) || 0), 0);
+  
+  const totalMadeTea = filteredRecords.reduce((sum, r) => sum + (Number(r.madeTeaWeight) || 0), 0);
+  const totalSelectionLabour = filteredRecords.reduce((sum, r) => sum + (Number(r.workerCount) || 0), 0);
+  const totalHandRollingLabour = filteredRecords.reduce((sum, r) => sum + (Number(r.rollingWorkerCount) || 0), 0);
 
-  // Calculate Total Out Turn % for Footer
+  // Calculate Total Out Turn % for Footer using new selectedTeaWeight
   let totalOutTurnDisplay = "-";
-  if (totalSelectedGL > 0 && totalMadeTea > 0) {
-    totalOutTurnDisplay =
-      ((totalMadeTea / totalSelectedGL) * 100).toFixed(2) + "%";
+  if (totalSelectedTeaWeight > 0 && totalMadeTea > 0) {
+    totalOutTurnDisplay = ((totalMadeTea / totalSelectedTeaWeight) * 100).toFixed(2) + "%";
   }
 
   const totalUnits = filteredRecords.reduce((sum, r) => {
@@ -429,7 +407,6 @@ export default function GreenLeafForm() {
   };
 
   const getPdfData = () => {
-    // 1. මුලින්ම එකම දිනය තියෙන records කීයක් තියෙනවද කියලා rowSpan ගණන් කරගන්න (Pre-calculate row spans)
     const dateRowSpans = {};
     filteredRecords.forEach((record) => {
       const d = record.date;
@@ -471,29 +448,25 @@ export default function GreenLeafForm() {
           ? `${record.dryerName}\n(${record.dryerUpdatedDate})`
           : "-";
 
-      // --- දිනය Merge කිරීම සඳහා Cell Object එකක් සෑදීම ---
-      let pdfDateCell = null; // '' වෙනුවට null භාවිතා කරන්න
+      let pdfDateCell = null;
       const dateKey = record.date;
       let dateText = record.isEdited
         ? `${record.date}\n(Edited: ${record.lastUpdatedDate} by ${record.editedBy})`
         : record.date;
 
       if (!seenDates.has(dateKey)) {
-        // මේ දිනය හමුවූ පළමු වතාව නම්: rowSpan එක සහ දිනය ඇතුළත් කරන්න
         pdfDateCell = {
           content: dateText,
           rowSpan: dateRowSpans[dateKey],
         };
         seenDates.add(dateKey);
       }
-      // else block එකක් අවශ්‍ය නැත. ඊළඟ පේළි සඳහා මෙය array එකට ඇතුලත් නොකළ යුතුය.
 
       const rollingText =
         record.rollingType === "H/R" && record.rollingWorkerCount > 0
           ? `H/R\n(${record.rollingWorkerCount} wkrs)`
           : record.rollingType;
 
-      // --- Out Turn % Calculation එක ---
       let outTurnDisplay = "-";
       if (record.teaType !== "-" && record.teaType !== "") {
         const key = `${record.date}_${record.teaType}`;
@@ -512,16 +485,16 @@ export default function GreenLeafForm() {
           }
           seenPdfOutTurns.add(key);
         } else {
-          outTurnDisplay = ""; // මෙය rowSpan භාවිතා නොකරන නිසා මෙලෙස හිස් කිරීම නිවැරදියි
+          outTurnDisplay = ""; 
         }
       }
 
-      // Date cell එක නොමැතිව Data array එක සාදාගන්න
       const rowData = [
         Number(record.totalWeight) === 0 ? "-" : record.totalWeight,
         Number(record.selectedWeight) === 0 ? "-" : record.selectedWeight,
         Number(record.returnedWeight) === 0 ? "-" : record.returnedWeight,
         record.teaType,
+        Number(record.selectedTeaWeight) === 0 ? "-" : record.selectedTeaWeight,
         Number(record.madeTeaWeight) === 0 ? "-" : record.madeTeaWeight,
         outTurnDisplay,
         pdfDryerName,
@@ -537,7 +510,6 @@ export default function GreenLeafForm() {
         rollingText,
       ];
 
-      // Date cell එකක් ඇත්නම් පමණක් එය array එකේ මුලට (unshift) එකතු කරන්න
       if (pdfDateCell) {
         rowData.unshift(pdfDateCell);
       }
@@ -555,6 +527,7 @@ export default function GreenLeafForm() {
         totalSelectedGL === 0 ? "-" : totalSelectedGL.toFixed(2),
         totalReturnedGL === 0 ? "-" : totalReturnedGL.toFixed(2),
         "-",
+        totalSelectedTeaWeight === 0 ? "-" : totalSelectedTeaWeight.toFixed(2), 
         totalMadeTea === 0 ? "-" : totalMadeTea.toFixed(3),
         totalOutTurnDisplay,
         "-",
@@ -606,6 +579,7 @@ export default function GreenLeafForm() {
                   "Selected GL",
                   "Return GL",
                   "Tea Type",
+                  "Sel. Tea",
                   "Made Tea",
                   "Out Turn %",
                   "Dryer",
@@ -741,9 +715,8 @@ export default function GreenLeafForm() {
                         Material
                       </div>
                     </th>
-                    {/* Changed colSpan from 2 to 3 for Output section */}
                     <th
-                      colSpan="3"
+                      colSpan="4"
                       className="px-3 sm:px-4 py-2 font-bold text-purple-700 dark:text-purple-400 border-r border-gray-200 dark:border-zinc-800 bg-[#f5f0ff] dark:bg-purple-900/20 text-center uppercase tracking-wider text-[10px] sm:text-[11px]"
                     >
                       <div className="flex items-center justify-center gap-1.5">
@@ -793,9 +766,11 @@ export default function GreenLeafForm() {
                       Type
                     </th>
                     <th className="px-2 sm:px-3 py-2 font-semibold bg-[#f5f0ff]/50 dark:bg-purple-900/10 text-center border-r border-gray-200 dark:border-zinc-800">
+                      Sel. Tea
+                    </th>
+                    <th className="px-2 sm:px-3 py-2 font-semibold bg-[#f5f0ff]/50 dark:bg-purple-900/10 text-center border-r border-gray-200 dark:border-zinc-800">
                       Made (kg)
                     </th>
-                    {/* Added Out Turn % Header */}
                     <th className="px-2 sm:px-3 py-2 font-semibold bg-[#f5f0ff]/50 dark:bg-purple-900/10 text-center border-r border-gray-200 dark:border-zinc-800">
                       OutTurn %
                     </th>
@@ -835,7 +810,6 @@ export default function GreenLeafForm() {
                           ? "py-1 sm:py-1.5"
                           : "py-2 sm:py-3";
 
-                        // මේ දවස ඇතුළෙ UI එකේ පෙන්නපු Tea Types Track කරන්න අලුත් Set එකක්
                         const seenTeaTypes = new Set();
 
                         return (
@@ -849,6 +823,7 @@ export default function GreenLeafForm() {
 
                               let displayUnits = record.units;
                               let displayRollerPoints = record.rollerPoints;
+                              let isSharedDryer = false;
 
                               if (
                                 record.meterStart !== "-" &&
@@ -860,6 +835,8 @@ export default function GreenLeafForm() {
                                 const groupInfo = groupMap[key];
 
                                 if (groupInfo && groupInfo.count > 1) {
+                                  isSharedDryer = true;
+                                  
                                   const adjustedUnits =
                                     Number(record.units) / groupInfo.count;
                                   displayUnits = Number.isInteger(adjustedUnits)
@@ -876,7 +853,6 @@ export default function GreenLeafForm() {
                                 }
                               }
 
-                              // Calculate Grouped Out Turn % for Row (එක් තේ වර්ගයකට එක පාරක් පමණයි පෙන්වන්නේ)
                               let outTurnDisplay = "-";
                               if (
                                 record.teaType !== "-" &&
@@ -897,16 +873,20 @@ export default function GreenLeafForm() {
                                         100
                                       ).toFixed(2) + "%";
                                   }
-                                  seenTeaTypes.add(record.teaType); // පෙන්නුවා කියලා සලකුණු කරන්න
+                                  seenTeaTypes.add(record.teaType); 
                                 } else {
-                                  outTurnDisplay = ""; // කලින් පෙන්නලා නම් මේ පේළියේ හිස්ව තියන්න
+                                  outTurnDisplay = ""; 
                                 }
                               }
 
                               return (
                                 <tr
                                   key={record.productionId || index}
-                                  className={`transition-colors group hover:bg-gray-50/50 dark:hover:bg-zinc-800/20`}
+                                  className={`transition-colors group ${
+                                    isSharedDryer 
+                                      ? "bg-gray-100 dark:bg-zinc-800/40 hover:bg-gray-200/70 dark:hover:bg-zinc-800/60"
+                                      : "hover:bg-gray-50/50 dark:hover:bg-zinc-800/20"
+                                  }`}
                                 >
                                   {index === 0 && (
                                     /* Sticky Date Body */
@@ -975,6 +955,18 @@ export default function GreenLeafForm() {
                                       )}
                                     </div>
                                   </td>
+
+                                  {/* Added Cell for selectedTeaWeight */}
+                                  <td
+                                    className={`px-2 sm:px-3 ${paddingY} text-center border-r border-gray-200 dark:border-zinc-800 align-middle ${cellBottomBorder}`}
+                                  >
+                                    <div className="font-medium text-purple-700 dark:text-purple-400">
+                                      {Number(record.selectedTeaWeight) === 0
+                                        ? "-"
+                                        : record.selectedTeaWeight}
+                                    </div>
+                                  </td>
+
                                   <td
                                     className={`px-2 sm:px-3 ${paddingY} text-center border-r border-gray-200 dark:border-zinc-800 align-middle ${cellBottomBorder}`}
                                   >
@@ -984,7 +976,7 @@ export default function GreenLeafForm() {
                                         : record.madeTeaWeight}
                                     </div>
                                   </td>
-                                  {/* Updated Out Turn % Cell */}
+                                  
                                   <td
                                     className={`px-2 sm:px-3 ${paddingY} text-center border-r border-gray-200 dark:border-zinc-800 align-middle ${cellBottomBorder}`}
                                   >
@@ -1139,7 +1131,7 @@ export default function GreenLeafForm() {
                   ) : (
                     <tr>
                       <td
-                        colSpan={isViewer ? "14" : "15"}
+                        colSpan={isViewer ? "15" : "16"}
                         className="p-8 sm:p-16 text-center text-gray-400 dark:text-gray-500"
                       >
                         <AlertCircle className="w-8 h-8 sm:w-10 sm:h-10 mx-auto mb-3 opacity-20" />
@@ -1177,11 +1169,16 @@ export default function GreenLeafForm() {
                       <td className="px-2 sm:px-3 py-3 sm:py-4 border-r border-gray-200 dark:border-zinc-800">
                         -
                       </td>
+                      
+                      {/* Added Footer Total for Sel. Tea */}
+                      <td className="px-2 sm:px-3 py-3 sm:py-4 border-r border-gray-200 dark:border-zinc-800 text-purple-700 dark:text-purple-400">
+                        {totalSelectedTeaWeight === 0 ? "-" : totalSelectedTeaWeight.toFixed(2)}
+                      </td>
 
                       <td className="px-2 sm:px-3 py-3 sm:py-4 border-r border-gray-200 dark:border-zinc-800 text-purple-700 dark:text-purple-400">
                         {totalMadeTea === 0 ? "-" : totalMadeTea.toFixed(3)}
                       </td>
-                      {/* Added Total Out Turn % Cell */}
+                      
                       <td className="px-2 sm:px-3 py-3 sm:py-4 border-r border-gray-200 dark:border-zinc-800 text-purple-700 dark:text-purple-400">
                         {totalOutTurnDisplay}
                       </td>

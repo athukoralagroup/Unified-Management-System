@@ -1,0 +1,494 @@
+import React, { useState, useEffect } from "react";
+import toast from "react-hot-toast";
+import { RefreshCw, Calendar, Table as TableIcon, LayoutList, LayoutGrid, FileSpreadsheet, FileDown } from "lucide-react";
+import * as XLSX from "xlsx-js-style";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+
+export default function SimpleAverage() {
+  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
+  const currentUsername = localStorage.getItem("username") || "Unknown User";
+  const userRole = localStorage.getItem("userRole");
+
+  const getCurrentMonth = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  };
+
+  const [records, setRecords] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
+  const [viewMode, setViewMode] = useState("simplified"); 
+
+  const routeOptions = [
+    "c1 - MATHTHAKA",
+    "c2 - walallawita",
+    "c3 - pelawaththa",
+    "c4 - polgampala",
+    "c5 - manampita",
+    "c7 - ganegoda",
+    "c8 - thundola",
+    "fa - factory",
+    "e - estate tea",
+  ];
+
+  useEffect(() => {
+    fetchRecords();
+  }, [selectedMonth]);
+
+  const fetchRecords = async () => {
+    setLoading(true);
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(`${BACKEND_URL}/api/factory-loft-leaf/report?month=${selectedMonth}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!response.ok) throw new Error("Failed to fetch records.");
+
+      const result = await response.json();
+      setRecords(result.data || []);
+    } catch (error) {
+      console.error("Fetch error:", error);
+      toast.error("Could not load records.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // --- MATRIX GENERATION LOGIC ---
+  const [yearStr, monthStr] = selectedMonth.split("-");
+  const daysInMonth = new Date(yearStr, monthStr, 0).getDate();
+  const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+
+  const matrixData = {};
+  routeOptions.forEach((r) => {
+    const routeKey = r.split(" - ")[0].toLowerCase(); 
+    matrixData[routeKey] = { fullName: r.toUpperCase() };
+    daysArray.forEach((day) => {
+      matrixData[routeKey][day] = { 
+        bestPercentage: null, 
+        belowBestPercentage: null, 
+        poorPercentage: null 
+      };
+    });
+  });
+
+  records.forEach((r) => {
+    // Skip records that don't have a date or factorySample data
+    if (!r.date || !r.factorySample || !r.factorySample.isEntered) return; 
+
+    const recordRouteKey = (r.route || "").split(" - ")[0].toLowerCase();
+    const day = parseInt(r.date.split("-")[2], 10); // Extract day from "YYYY-MM-DD"
+
+    if (matrixData[recordRouteKey] && matrixData[recordRouteKey][day]) {
+      matrixData[recordRouteKey][day].bestPercentage = Number(r.factorySample.bestPct) || 0;
+      matrixData[recordRouteKey][day].belowBestPercentage = Number(r.factorySample.belowBestPct) || 0;
+      matrixData[recordRouteKey][day].poorPercentage = Number(r.factorySample.poorPct) || 0;
+    }
+  });
+
+  // --- PDF EXPORT LOGIC (SIMPLIFIED ONLY) ---
+  const generateSimplifiedPDF = async () => {
+    if (Object.keys(matrixData).length === 0) {
+      toast.error("No data available to generate report!");
+      return;
+    }
+
+    const toastId = toast.loading("Generating PDF Report...");
+    try {
+      const doc = new jsPDF("p", "pt", "a4");
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const THEME_COLOR = [29, 78, 216]; 
+
+      doc.setTextColor(THEME_COLOR[0], THEME_COLOR[1], THEME_COLOR[2]);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(28);
+      doc.text("AG", 40, 50);
+      doc.setFontSize(8);
+      doc.text("ATHUKORALA GROUP", 40, 62);
+
+      doc.setFontSize(18);
+      doc.setTextColor(THEME_COLOR[0], THEME_COLOR[1], THEME_COLOR[2]);
+      doc.text("Sheet 2: Simple Averages Summary", 160, 42);
+      
+      doc.setFontSize(10);
+      doc.setTextColor(100, 100, 100);
+      doc.setFont("helvetica", "normal");
+      doc.text(`Reporting Month: ${selectedMonth} (Factory Samples Only)`, 160, 56);
+
+      const dateObj = new Date();
+      const timeString = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }).toLowerCase();
+      const dateString = dateObj.toISOString().split("T")[0];
+
+      doc.setFontSize(9);
+      doc.text(`Generated: ${dateString} ${timeString}`, pageWidth - 40, 50, { align: 'right' });
+
+      doc.setDrawColor(220, 220, 220);
+      doc.setLineWidth(1);
+      doc.line(40, 75, pageWidth - 40, 75);
+
+      let currentY = 100;
+
+      const drawPdfTable = (title, dataKey, themeColorRgb) => {
+          doc.setFontSize(12);
+          doc.setTextColor(themeColorRgb[0], themeColorRgb[1], themeColorRgb[2]);
+          doc.setFont("helvetica", "bold");
+          doc.text(title, 40, currentY);
+          currentY += 15;
+
+          const body = [];
+          Object.keys(matrixData).forEach((routeKey) => {
+              const data = matrixData[routeKey];
+              let rowSum = 0;
+              let activeDays = 0;
+
+              daysArray.forEach((day) => {
+                  const val = data[day][dataKey];
+                  if (val !== null && val > 0) {
+                      rowSum += val;
+                      activeDays++;
+                  }
+              });
+
+              const rowAverage = activeDays > 0 ? (rowSum / activeDays) : 0;
+
+              body.push([
+                  data.fullName,
+                  activeDays,
+                  rowSum > 0 ? rowSum.toFixed(2) : "-",
+                  activeDays > 0 ? `${rowAverage.toFixed(2)}%` : "-"
+              ]);
+          });
+
+          autoTable(doc, {
+              startY: currentY,
+              head: [['Route', 'Active Days', 'Sum of %', 'Simple Average %']],
+              body: body,
+              theme: 'grid',
+              headStyles: { fillColor: themeColorRgb, textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center' },
+              columnStyles: { 0: { halign: 'left', fontStyle: 'bold' }, 1: { halign: 'center' }, 2: { halign: 'center' }, 3: { halign: 'center', fontStyle: 'bold' } },
+              styles: { fontSize: 10, cellPadding: 5 }
+          });
+
+          currentY = doc.lastAutoTable.finalY + 30;
+          if(currentY > pageHeight - 100) { doc.addPage(); currentY = 40; }
+      };
+
+      drawPdfTable("1. BEST TEA AVERAGE %", "bestPercentage", [27, 106, 49]); 
+      drawPdfTable("2. BELOW BEST TEA AVERAGE %", "belowBestPercentage", [217, 119, 6]); 
+      drawPdfTable("3. POOR TEA AVERAGE %", "poorPercentage", [220, 38, 38]); 
+
+      const footerY = pageHeight - 50;
+      doc.setFontSize(10);
+      doc.setTextColor(100, 100, 100);
+      doc.text("Generated By:", 40, footerY);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(0, 0, 0);
+      doc.text(`${currentUsername} (${userRole})`, 40, footerY + 15);
+      
+      doc.save(`Sheet2_Simple_Averages_${selectedMonth}.pdf`);
+      toast.success("PDF downloaded successfully!", { id: toastId });
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to generate PDF.", { id: toastId });
+    }
+  };
+
+  // --- EXCEL EXPORT LOGIC ---
+  const exportToExcel = () => {
+    if (Object.keys(matrixData).length === 0) { toast.error("No data to export!"); return; }
+
+    const toastId = toast.loading("Generating Excel file with Formulas...");
+    try {
+      const wb = XLSX.utils.book_new();
+
+      const createSheetData = (dataKey, sheetTitle, themeColor) => {
+        const aoa = []; 
+        const titleStyle = { font: { bold: true, sz: 16, color: { rgb: themeColor } } };
+        const headerStyle = { font: { bold: true, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: themeColor } }, alignment: { horizontal: "center", vertical: "center" }, border: { top: {style: "thin"}, bottom: {style: "thin"}, left: {style: "thin"}, right: {style: "thin"} } };
+        const cellStyle = { alignment: { horizontal: "center", vertical: "center" }, border: { bottom: {style: "thin", color:{rgb:"E5E7EB"}}, right: {style: "thin", color:{rgb:"E5E7EB"}}, left: {style: "thin", color:{rgb:"E5E7EB"}} } };
+        const boldCell = { ...cellStyle, font: { bold: true } };
+        const summaryCell = { ...cellStyle, font: { bold: true }, fill: { fgColor: { rgb: "F3F4F6" } } };
+
+        aoa.push([{ v: sheetTitle, s: titleStyle }]);
+        aoa.push([{ v: "Data calculated using Factory Samples Only", s: { font: { italic: true, color: { rgb: "6B7280" } } } }]);
+        aoa.push([]); 
+
+        const header = [{ v: "Route", s: headerStyle }];
+        daysArray.forEach(d => { header.push({ v: `Date ${d}`, s: headerStyle }); });
+        header.push({ v: "Active Days", s: headerStyle }, { v: "Row Sum %", s: headerStyle }, { v: "Simple Avg %", s: headerStyle });
+        aoa.push(header);
+
+        // Utility to convert number to Excel Column Letter (0 = A, 1 = B, ..., 26 = AA)
+        const numToCol = (n) => {
+            let ordA = 'A'.charCodeAt(0);
+            let ordZ = 'Z'.charCodeAt(0);
+            let len = ordZ - ordA + 1;
+            let s = "";
+            while(n >= 0) {
+                s = String.fromCharCode(n % len + ordA) + s;
+                n = Math.floor(n / len) - 1;
+            }
+            return s;
+        };
+
+        // Data Rows start at Excel row index 5 (because array push starts at 0, and we pushed 4 rows)
+        let currentRow = 5; 
+
+        Object.keys(matrixData).forEach(routeKey => {
+          const data = matrixData[routeKey];
+          const row = [{ v: data.fullName, s: boldCell }];
+          
+          // To track which cells have actual values (for COUNT and SUM formulas)
+          const dataCells = [];
+
+          daysArray.forEach((day, index) => {
+            const val = data[day][dataKey];
+            const colLetter = numToCol(index + 1); // +1 because index 0 is "Route"
+
+            if (val !== null && val > 0) { 
+                dataCells.push(`${colLetter}${currentRow}`);
+            }
+
+            // Write numbers (t:'n') to allow Excel calculations, otherwise blank
+            row.push(
+               val !== null && val > 0 
+               ? { v: Number(Math.round(val)), t: 'n', s: cellStyle } 
+               : { v: "", s: cellStyle }
+            );
+          });
+
+          // 💡 Formulas for Summaries
+          const firstDataCol = numToCol(1);
+          const lastDataCol = numToCol(daysArray.length);
+          const dataRange = `${firstDataCol}${currentRow}:${lastDataCol}${currentRow}`;
+          
+          const sumColLetter = numToCol(daysArray.length + 2); // Column for "Row Sum %"
+          const activeDaysColLetter = numToCol(daysArray.length + 1); // Column for "Active Days"
+
+          row.push(
+            // Formula for Active Days: Count how many cells have numbers > 0
+            { f: `COUNTIF(${dataRange}, ">0")`, s: summaryCell },
+            
+            // Formula for Row Sum %: Sum of the range
+            { f: `SUM(${dataRange})`, s: summaryCell },
+            
+            // Formula for Simple Avg %: (Row Sum / Active Days)
+            { f: `IF(${activeDaysColLetter}${currentRow}>0, (${sumColLetter}${currentRow}/${activeDaysColLetter}${currentRow})/100, 0)`, 
+              s: { ...summaryCell, numFmt: "0.00%", font: { bold: true, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: themeColor } } } 
+            }
+          );
+          
+          aoa.push(row);
+          currentRow++;
+        });
+
+        const ws = XLSX.utils.aoa_to_sheet(aoa);
+        
+        const colWidths = [{ wch: 18 }]; 
+        daysArray.forEach(() => colWidths.push({ wch: 7 })); 
+        colWidths.push({ wch: 12 }, { wch: 12 }, { wch: 14 }); 
+        ws['!cols'] = colWidths;
+
+        return ws;
+      };
+
+      XLSX.utils.book_append_sheet(wb, createSheetData("bestPercentage", `BEST TEA AVG - ${selectedMonth}`, "1B6A31"), "Best Tea");
+      XLSX.utils.book_append_sheet(wb, createSheetData("belowBestPercentage", `BELOW BEST AVG - ${selectedMonth}`, "D97706"), "Below Best");
+      XLSX.utils.book_append_sheet(wb, createSheetData("poorPercentage", `POOR TEA AVG - ${selectedMonth}`, "DC2626"), "Poor Tea");
+
+      XLSX.writeFile(wb, `Sheet2_Simple_Averages_${selectedMonth}.xlsx`);
+      toast.success("Excel file downloaded!", { id: toastId });
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to generate Excel file.", { id: toastId });
+    }
+  };
+
+  const renderTable = (title, dataKey, theme) => {
+    return (
+      <div className="mb-10 bg-white dark:bg-zinc-900 rounded-xl shadow-sm border border-gray-200 dark:border-zinc-800 w-full overflow-hidden">
+        <div className={`px-4 py-3 border-b ${theme.headerBorder} ${theme.headerBg}`}>
+            <h3 className={`font-black text-lg ${theme.titleText}`}>{title}</h3>
+        </div>
+
+        <div className="overflow-x-auto custom-scrollbar w-full max-h-[60vh]">
+          <table className="w-full text-xs text-center border-collapse min-w-max">
+            <thead>
+              <tr className="bg-gray-100 dark:bg-zinc-950 text-gray-600 dark:text-gray-300">
+                <th className={`bg-gray-100 dark:bg-zinc-950 border-b border-r border-gray-300 dark:border-zinc-700 px-4 py-3 font-bold uppercase ${viewMode === "detailed" ? "sticky left-0 z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]" : ""}`}>
+                  Route
+                </th>
+
+                {viewMode === "detailed" && daysArray.map((day) => (
+                  <th key={day} className={`border-b border-r border-gray-200 dark:border-zinc-700 py-3 font-black text-sm ${theme.cellText}`}>
+                    {day}
+                  </th>
+                ))}
+
+                <th className={`border-b border-l px-4 py-3 font-bold text-sm ${theme.subSummaryBg} ${theme.subSummaryBorder} ${viewMode === "detailed" ? "sticky right-[180px] z-20" : ""}`}>Active Days</th>
+                <th className={`border-b border-l px-4 py-3 font-bold text-sm ${theme.subSummaryBg} ${theme.subSummaryBorder} ${viewMode === "detailed" ? "sticky right-[100px] z-20" : ""}`}>Row Sum %</th>
+                <th className={`text-white border-b border-l px-4 py-3 font-black text-sm ${theme.finalAvgBg} ${theme.finalAvgBorder} ${viewMode === "detailed" ? "sticky right-0 z-20 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.1)]" : ""}`}>Row Average %</th>
+              </tr>
+            </thead>
+
+            <tbody className="bg-white dark:bg-zinc-950">
+              {Object.keys(matrixData).map((routeKey) => {
+                const data = matrixData[routeKey];
+                let rowSum = 0;
+                let activeDaysCount = 0;
+
+                daysArray.forEach((day) => {
+                  const val = data[day][dataKey];
+                  if (val !== null && val > 0) {
+                    rowSum += val;
+                    activeDaysCount++;
+                  }
+                });
+
+                const rowAverage = activeDaysCount > 0 ? (rowSum / activeDaysCount) : 0;
+
+                return (
+                  <tr key={routeKey} className={`hover:${theme.hoverBg} dark:hover:bg-zinc-900/50 transition-colors group`}>
+                    <td className={`bg-white dark:bg-zinc-950 group-hover:${theme.hoverBg} dark:group-hover:bg-zinc-900/50 border-b border-r border-gray-200 dark:border-zinc-800 px-4 py-3 font-bold text-gray-800 dark:text-gray-200 text-left whitespace-nowrap ${viewMode === "detailed" ? "sticky left-0 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]" : ""}`}>
+                      {data.fullName}
+                    </td>
+
+                    {viewMode === "detailed" && daysArray.map((day) => {
+                      const val = data[day][dataKey];
+                      return (
+                        <td key={`${routeKey}-${day}`} className="border-b border-r border-gray-100 dark:border-zinc-800 px-2 py-3 text-gray-700 dark:text-gray-300 font-medium">
+                          {val !== null && val > 0 ? Math.round(val) : "-"}
+                        </td>
+                      );
+                    })}
+
+                    <td className={`border-b border-l px-4 py-3 font-bold text-gray-600 dark:text-gray-400 ${theme.subSummaryBg} ${theme.subSummaryBorder} ${viewMode === "detailed" ? "sticky right-[180px] z-10" : ""}`}>
+                      {activeDaysCount > 0 ? activeDaysCount : "-"}
+                    </td>
+                    <td className={`border-b border-l px-4 py-3 font-bold text-gray-800 dark:text-gray-200 ${theme.subSummaryBg} ${theme.subSummaryBorder} ${viewMode === "detailed" ? "sticky right-[100px] z-10" : ""}`}>
+                      {rowSum > 0 ? rowSum.toFixed(2) : "-"}
+                    </td>
+                    <td className={`border-b border-l px-4 py-3 font-black text-white ${viewMode === "detailed" ? "text-sm" : "text-lg"} ${theme.finalAvgBg} ${theme.finalAvgBorder} ${viewMode === "detailed" ? "sticky right-0 z-10 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.1)]" : ""}`}>
+                      {activeDaysCount > 0 ? `${rowAverage.toFixed(2)}%` : "-"}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="p-4 sm:p-8 max-w-[95vw] mx-auto font-sans relative min-h-screen">
+      {/* --- HEADER --- */}
+      <div className="mb-5 md:mb-8 flex flex-col gap-4 sm:gap-5 bg-white dark:bg-zinc-900 p-4 sm:p-5 rounded-2xl shadow-sm border border-gray-200 dark:border-zinc-800">
+        
+        {/* 💡 Title Part (Top) */}
+        <div className="w-full text-center sm:text-left border-b border-gray-100 dark:border-zinc-800 pb-3 sm:pb-4">
+          <h2 className="text-xl sm:text-2xl font-bold text-blue-700 dark:text-blue-500 flex items-center justify-center sm:justify-start gap-2">
+            <TableIcon size={24} /> Sheet 2: Simple Averages
+          </h2>
+          <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mt-1">
+            Calculation: Sum of Daily Percentages ÷ Number of Active Days (Factory Samples Only)
+          </p>
+        </div>
+
+        {/* 💡 Controls Part (Below Title) */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full">
+          
+          {/* VIEW MODE TOGGLE BUTTONS */}
+          <div className="flex bg-gray-100 dark:bg-zinc-800/80 p-1 rounded-lg border border-gray-200 dark:border-zinc-700 shadow-sm w-full sm:w-auto sm:mr-auto">
+            <button 
+              onClick={() => setViewMode("simplified")} 
+              className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 text-sm font-bold rounded-md transition-colors ${viewMode === "simplified" ? "bg-white dark:bg-zinc-700 text-blue-600 dark:text-blue-400 shadow" : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"}`}
+            >
+              <LayoutList size={16} /> Simplified
+            </button>
+            <button 
+              onClick={() => setViewMode("detailed")} 
+              className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 text-sm font-bold rounded-md transition-colors ${viewMode === "detailed" ? "bg-white dark:bg-zinc-700 text-blue-600 dark:text-blue-400 shadow" : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"}`}
+            >
+              <LayoutGrid size={16} /> Detailed
+            </button>
+          </div>
+          
+          {/* MONTH PICKER */}
+          <div className="relative flex-1 sm:flex-none w-full sm:w-auto">
+            <Calendar size={18} className="absolute left-3 top-3 text-blue-600 dark:text-blue-500" />
+            <input 
+              type="month" 
+              value={selectedMonth} 
+              onChange={(e) => setSelectedMonth(e.target.value)} 
+              className="w-full pl-10 pr-4 py-2.5 border border-blue-200 dark:border-zinc-700 rounded-lg text-sm font-bold focus:ring-2 focus:ring-blue-500/50 outline-none bg-blue-50/30 dark:bg-zinc-800 text-blue-800 dark:text-blue-400 cursor-pointer transition-all shadow-inner"
+            />
+          </div>
+
+          <div className="flex gap-2 sm:gap-3 w-full sm:w-auto h-10 sm:h-auto">
+            {/* CONDITIONAL DOWNLOAD/EXPORT BUTTON */}
+            {viewMode === "simplified" ? (
+              <button 
+                onClick={generateSimplifiedPDF} 
+                disabled={loading} 
+                className="p-2.5 px-3 sm:px-4 flex-1 sm:flex-none justify-center bg-green-600 hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-500 text-white rounded-lg transition-colors font-bold text-sm disabled:opacity-50 flex items-center gap-2 shadow-sm"
+              >
+                <FileDown size={18} /> <span className="font-bold text-xs sm:text-sm hidden sm:inline">Download PDF</span>
+              </button>
+            ) : (
+              <button 
+                onClick={exportToExcel} 
+                disabled={loading} 
+                className="p-2.5 px-3 sm:px-4 flex-1 sm:flex-none justify-center bg-blue-600 hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-500 text-white rounded-lg transition-colors font-bold text-sm disabled:opacity-50 flex items-center gap-2 shadow-sm"
+              >
+                <FileSpreadsheet size={18} /> <span className="font-bold text-xs sm:text-sm hidden sm:inline">Export Excel</span>
+              </button>
+            )}
+
+            {/* REFRESH BUTTON */}
+            <button 
+              onClick={fetchRecords} 
+              disabled={loading} 
+              className={`p-2.5 flex-1 sm:flex-none flex justify-center bg-gray-100 hover:bg-gray-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-gray-600 dark:text-gray-300 rounded-lg transition-colors shadow-sm ${loading ? "opacity-70 cursor-not-allowed" : ""}`}
+              title="Refresh Data"
+            >
+              <RefreshCw size={18} className={loading ? "animate-spin text-blue-600 dark:text-blue-500" : "text-blue-600 dark:text-blue-500"} />
+            </button>
+          </div>
+
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="py-24 flex flex-col items-center justify-center">
+          <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-4"></div>
+          <p className="text-gray-500 font-medium">Calculating Averages...</p>
+        </div>
+      ) : (
+        <div className="space-y-8">
+          {renderTable("1. BEST TEA AVERAGE %", "bestPercentage", {
+            headerBg: "bg-green-100 dark:bg-green-950/50", headerBorder: "border-green-200 dark:border-green-800", titleText: "text-[#1B6A31] dark:text-green-500",
+            subSummaryBg: "bg-green-50 dark:bg-green-950/40", subSummaryBorder: "border-green-200 dark:border-green-800/50",
+            finalAvgBg: "bg-[#1B6A31] dark:bg-green-700", finalAvgBorder: "border-green-800", cellText: "text-green-700 dark:text-green-400", hoverBg: "bg-green-50"
+          })}
+
+          {renderTable("2. BELOW BEST AVERAGE %", "belowBestPercentage", {
+            headerBg: "bg-orange-100 dark:bg-orange-950/50", headerBorder: "border-orange-200 dark:border-orange-800", titleText: "text-orange-700 dark:text-orange-500",
+            subSummaryBg: "bg-orange-50 dark:bg-orange-950/40", subSummaryBorder: "border-orange-200 dark:border-orange-800/50",
+            finalAvgBg: "bg-orange-500 dark:bg-orange-700", finalAvgBorder: "border-orange-600", cellText: "text-orange-700 dark:text-orange-400", hoverBg: "bg-orange-50"
+          })}
+
+          {renderTable("3. POOR TEA AVERAGE %", "poorPercentage", {
+            headerBg: "bg-red-100 dark:bg-red-950/50", headerBorder: "border-red-200 dark:border-red-800", titleText: "text-red-700 dark:text-red-500",
+            subSummaryBg: "bg-red-50 dark:bg-red-950/40", subSummaryBorder: "border-red-200 dark:border-red-800/50",
+            finalAvgBg: "bg-red-600 dark:bg-red-700", finalAvgBorder: "border-red-800", cellText: "text-red-700 dark:text-red-400", hoverBg: "bg-red-50"
+          })}
+        </div>
+      )}
+    </div>
+  );
+}

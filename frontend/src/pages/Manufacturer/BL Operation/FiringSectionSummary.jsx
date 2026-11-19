@@ -1,0 +1,2828 @@
+import React, { useState, useEffect, useMemo } from "react";
+import {
+  Calendar,
+  Clock,
+  CheckCircle2,
+  RefreshCw,
+  Languages,
+  Flame,
+  Scale,
+  Fuel,
+  Calculator,
+  Filter,
+  X,
+  Package,
+  Sparkles,
+  UserCheck,
+  Edit3,
+  Edit,
+  AlertTriangle,
+  Save,
+  RotateCcw,
+} from "lucide-react";
+import toast from "react-hot-toast";
+import PDFDownloader from "@/components/PDFDownloader";
+
+const normalizeDate = (dateVal) => {
+  if (!dateVal) return "";
+  if (typeof dateVal === "string") return dateVal.split("T")[0];
+  try {
+    return new Date(dateVal).toISOString().split("T")[0];
+  } catch {
+    return "";
+  }
+};
+
+const getTodayDate = () => {
+  const today = new Date();
+  const yyyy = today.getFullYear();
+  const mm = String(today.getMonth() + 1).padStart(2, "0");
+  const dd = String(today.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+};
+
+const calculateDuration = (start, finish) => {
+  if (!start || !finish) return { decimal: 0, str: "" };
+  try {
+    const [startH, startM] = start.split(":").map(Number);
+    const [endH, endM] = finish.split(":").map(Number);
+    if (isNaN(startH) || isNaN(startM) || isNaN(endH) || isNaN(endM)) {
+      return { decimal: 0, str: "" };
+    }
+    let diffMinutes = endH * 60 + endM - (startH * 60 + startM);
+    if (diffMinutes < 0) diffMinutes += 24 * 60;
+    const hrs = Math.floor(diffMinutes / 60);
+    const mins = diffMinutes % 60;
+    const decimal = parseFloat((diffMinutes / 60).toFixed(2));
+    return {
+      decimal,
+      str: `${hrs}h ${mins}m`,
+    };
+  } catch {
+    return { decimal: 0, str: "" };
+  }
+};
+
+const preventNegativeKeys = (e) => {
+  if (e.key === "-" || e.key === "e" || e.key === "E" || e.key === "+") {
+    e.preventDefault();
+  }
+};
+
+const FiringSectionSummary = () => {
+  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
+
+  const userRole = localStorage.getItem("userRole") || "Admin";
+  const currentUsername = localStorage.getItem("username") || "admin";
+
+  const [allRecords, setAllRecords] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filterDate, setFilterDate] = useState(getTodayDate());
+  const [lang, setLang] = useState("EN");
+  const [isDirty, setIsDirty] = useState(false);
+
+  const [isEditing, setIsEditing] = useState(false);
+  const [editForm, setEditForm] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const t = useMemo(
+    () => ({
+      title:
+        lang === "SI"
+          ? "ඩ්‍රයර් කාමර වාර්තා පත්‍රිකාව"
+          : "DRIER ROOM RECORD SHEET",
+      subtitle:
+        lang === "SI"
+          ? "දෛනික ඩ්‍රයර් 01, 02 සහ සම්පූර්ණ ධූල්, දර පරිභෝජන සහ පිරිවැය සාරාංශ වාර්තාව."
+          : "Consolidated report of Drier 01, Drier 02, and Total Dhools, Firewood usage, and production costs.",
+      sync: lang === "SI" ? "යාවත්කාලීන කරන්න" : "Sync",
+      refreshing: lang === "SI" ? "යාවත්කාලීන වෙමින්..." : "Refreshing...",
+      downloadPdf: lang === "SI" ? "PDF බාගත කරන්න" : "Download PDF",
+      filterDay:
+        lang === "SI"
+          ? "නිෂ්පාදිත දිනය අනුව තෝරන්න (M/F Date):"
+          : "Filter by M/F Date:",
+      clear: lang === "SI" ? "මකන්න" : "Clear",
+      editRecord: lang === "SI" ? "සංස්කරණය කරන්න" : "Edit Record",
+      saveChanges: lang === "SI" ? "සුරකින්න" : "Save Changes",
+      cancelEdit: lang === "SI" ? "අවලංගු කරන්න" : "Cancel",
+      noRecordFound:
+        lang === "SI"
+          ? "තෝරාගත් දිනය සඳහා වාර්තා හමු නොවීය"
+          : "No Drier Records Found",
+      noRecordDesc:
+        lang === "SI"
+          ? "මෙම නිෂ්පාදිත දිනය සඳහා තවමත් ඩ්‍රයර් කාමර සටහනක් ඇතුලත් කර නොමැත."
+          : "There is no drier room sheet recorded for the selected manufacturing date.",
+
+      mfDate: lang === "SI" ? "නිෂ්පාදිත දිනය (M/F Date)" : "M/F DATE",
+      cropDate: lang === "SI" ? "අස්වැන්න දිනය (Crop Date)" : "CROP DATE",
+      cropKg: lang === "SI" ? "අස්වැන්න (Crop Kg)" : "CROP (Kg)",
+
+      drier1: "DHOOLS (kg) - 01",
+      drier2: "DHOOLS (kg) - 02",
+      drierTotal: "DHOOLS (kg) TOTAL",
+      item: lang === "SI" ? "අයිතමය" : "Item",
+      kg: lang === "SI" ? "කි.ග්‍රෑ." : "Kg",
+      pct: "%",
+
+      first: "1ST",
+      second: "2ND",
+      third: "3RD",
+      dir: "DIR / R",
+      bigBulk: "BIG BULK",
+      totalFiredTea: "TOTAL FIRED TEA",
+
+      fwUsage1: "FIREWOOD USAGE (kg) - 01",
+      fwUsage2: "FIREWOOD USAGE (kg) - 02",
+      fwUsageTotal: "FIREWOOD USAGE (kg) TOTAL",
+      f: "F",
+      rf: "R/F",
+      w: "W",
+      extra: "EXTRA",
+      total: "TOTAL",
+
+      fwOut1: "FIREWOOD OUTPUT - 01",
+      fwOut2: "FIREWOOD OUTPUT - 02",
+      fwOutTotal: "FIREWOOD OUTPUT TOTAL",
+      withoutWithering: "WITHOUT WITHERING",
+      withering: "WITH WITHERING",
+      totalOutput: "TOTAL OUTPUT",
+
+      drier01Title: "DRIER - 01",
+      drier02Title: "DRIER - 02",
+      startTime: "START TIME",
+      endTime: "END TIME",
+      totalHours: "TOTAL HOURS",
+      drierOutputPerHour: "DRIER OUTPUT / H",
+
+      costDrier01: "DRIER - 01",
+      costDrier02: "DRIER - 02",
+      costTotal: "TOTAL",
+      totalFwKg: "TOTAL F/W KG",
+      unitPrice: "UNIT PRICE (Rs.)",
+      madeTeaKg: "MADE TEA KG",
+      costOfFw: "COST OF F/W (Rs.)",
+
+      officerName: "OFFICER NAME",
+      checkBy: "CHECK BY",
+      benchmarkTitle:
+        lang === "SI"
+          ? "කර්මාන්තශාලා සම්මත මාර්ගෝපදේශ"
+          : "Standard Factory Benchmark Specifications",
+      editBtn: "Edit Record",
+      cancelBtn: "Cancel",
+      saveBtn: "Save Changes",
+      editedBy: "LAST EDITED BY",
+      editedAt: "LAST EDITED AT",
+    }),
+    [lang],
+  );
+
+  const fetchRecords = async () => {
+    setLoading(true);
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(`${BACKEND_URL}/api/firing-section`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      const result = await response.json();
+      if (response.ok && result.success) {
+        const records = Array.isArray(result.data) ? result.data : [];
+        setAllRecords(records);
+
+        if (records.length > 0) {
+          const matchExists = records.some(
+            (r) => normalizeDate(r?.dateOfManufacture) === filterDate,
+          );
+          if (!matchExists) {
+            const latestMfDate = normalizeDate(records[0]?.dateOfManufacture);
+            if (latestMfDate) setFilterDate(latestMfDate);
+          }
+        }
+      } else {
+        toast.error("Failed to load drier records.");
+      }
+    } catch (error) {
+      console.error("Fetch error:", error);
+      toast.error("Connection error while fetching drier records.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchRecords();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const currentRecord = useMemo(() => {
+    if (!allRecords || allRecords.length === 0) return null;
+    if (!filterDate) return allRecords[0];
+
+    return (
+      allRecords.find(
+        (r) => normalizeDate(r?.dateOfManufacture) === filterDate,
+      ) || null
+    );
+  }, [allRecords, filterDate]);
+
+  useEffect(() => {
+    setIsEditing(false);
+    setEditForm(null);
+    setIsDirty(false);
+  }, [filterDate]);
+
+  const handleStartEdit = () => {
+    if (!currentRecord) return;
+    setEditForm({
+      ...currentRecord,
+      allocation: {
+        slot1Dhool:
+          currentRecord.allocation?.slot1Dhool ||
+          currentRecord.drier1?.allocatedDhool ||
+          "drier1",
+        slot2Dhool:
+          currentRecord.allocation?.slot2Dhool ||
+          currentRecord.drier2?.allocatedDhool ||
+          "drier2",
+      },
+      dateOfManufacture: normalizeDate(currentRecord.dateOfManufacture),
+      cropDate:
+        normalizeDate(currentRecord.cropDate) ||
+        normalizeDate(currentRecord.drier1?.day) ||
+        "",
+      cropKg: currentRecord.cropKg || "",
+      dhools: {
+        drier1: { ...(currentRecord.dhools?.drier1 || {}) },
+        drier2: { ...(currentRecord.dhools?.drier2 || {}) },
+      },
+      firewoodUsage: {
+        drier1: {
+          f:
+            currentRecord.drier1?.ffrw1 ??
+            currentRecord.firewoodUsage?.drier1?.f ??
+            "",
+          rf:
+            currentRecord.drier1?.ffrw2 ??
+            currentRecord.firewoodUsage?.drier1?.rf ??
+            "",
+          w:
+            currentRecord.drier1?.ffrw3 ??
+            currentRecord.firewoodUsage?.drier1?.w ??
+            "",
+        },
+        drier2: {
+          f:
+            currentRecord.drier2?.ffrw1 ??
+            currentRecord.firewoodUsage?.drier2?.f ??
+            "",
+          rf:
+            currentRecord.drier2?.ffrw2 ??
+            currentRecord.firewoodUsage?.drier2?.rf ??
+            "",
+          w:
+            currentRecord.drier2?.ffrw3 ??
+            currentRecord.firewoodUsage?.drier2?.w ??
+            "",
+        },
+      },
+      firewoodOutput: {
+        drier1: { ...(currentRecord.firewoodOutput?.drier1 || {}) },
+        drier2: { ...(currentRecord.firewoodOutput?.drier2 || {}) },
+      },
+      drier1: { ...(currentRecord.drier1 || {}) },
+      drier2: { ...(currentRecord.drier2 || {}) },
+      firewoodCost: {
+        drier1: { ...(currentRecord.firewoodCost?.drier1 || {}) },
+        drier2: { ...(currentRecord.firewoodCost?.drier2 || {}) },
+      },
+      officerName: currentRecord.officerName || "",
+      checkedBy: currentRecord.checkedBy || "",
+    });
+    setIsEditing(true);
+    setIsDirty(false);
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+    setEditForm(null);
+    setIsDirty(false);
+  };
+
+  const handleNestedChange = (section, subSection, field, val) => {
+    if (val !== "" && parseFloat(val) < 0) return;
+    setIsDirty(true);
+    setEditForm((prev) => ({
+      ...prev,
+      [section]: {
+        ...prev[section],
+        [subSection]: {
+          ...prev[section]?.[subSection],
+          [field]: val,
+        },
+      },
+    }));
+  };
+
+  const handleAllocationChange = (slotKey, val) => {
+    setIsDirty(true);
+    setEditForm((prev) => ({
+      ...prev,
+      allocation: {
+        ...prev.allocation,
+        [slotKey]: val,
+      },
+    }));
+  };
+
+  const activeRecord = isEditing ? editForm : currentRecord;
+
+  // Active allocation resolver prioritizing explicit values
+  const activeAllocation = useMemo(() => {
+    const slot1 =
+      activeRecord?.allocation?.slot1Dhool ||
+      activeRecord?.drier1?.allocatedDhool ||
+      (activeRecord?.drier1?.allocatedDhoolLabel === "Dhool 02" ? "drier2" : "drier1");
+
+    const slot2 =
+      activeRecord?.allocation?.slot2Dhool ||
+      activeRecord?.drier2?.allocatedDhool ||
+      (activeRecord?.drier2?.allocatedDhoolLabel === "Dhool 01" ? "drier1" : "drier2");
+
+    return {
+      slot1Dhool: slot1,
+      slot2Dhool: slot2,
+    };
+  }, [activeRecord]);
+
+  const slot1DhoolLabel =
+    activeAllocation.slot1Dhool === "drier1" ? "Dhool 01" : "Dhool 02";
+  const slot2DhoolLabel =
+    activeAllocation.slot2Dhool === "drier1" ? "Dhool 01" : "Dhool 02";
+
+  const calcData = useMemo(() => {
+    if (!activeRecord) return null;
+
+    const d1 = activeRecord.dhools?.drier1 || {};
+    const d2 = activeRecord.dhools?.drier2 || {};
+
+    const d1Items = {
+      first: Number(d1.first) || 0,
+      second: Number(d1.second) || 0,
+      third: Number(d1.third) || 0,
+      dir: Number(d1.dir) || 0,
+      bigBulk: Number(d1.bigBulk) || 0,
+    };
+    const d1Total =
+      d1Items.first +
+      d1Items.second +
+      d1Items.third +
+      d1Items.dir +
+      d1Items.bigBulk;
+
+    const d2Items = {
+      first: Number(d2.first) || 0,
+      second: Number(d2.second) || 0,
+      third: Number(d2.third) || 0,
+      dir: Number(d2.dir) || 0,
+      bigBulk: Number(d2.bigBulk) || 0,
+    };
+    const d2Total =
+      d2Items.first +
+      d2Items.second +
+      d2Items.third +
+      d2Items.dir +
+      d2Items.bigBulk;
+
+    const totalItems = {
+      first: d1Items.first + d2Items.first,
+      second: d1Items.second + d2Items.second,
+      third: d1Items.third + d2Items.third,
+      dir: d1Items.dir + d2Items.dir,
+      bigBulk: d1Items.bigBulk + d2Items.bigBulk,
+    };
+    const grandTotalFired = d1Total + d2Total;
+
+    const dr1 = activeRecord.drier1 || {};
+    const dr2 = activeRecord.drier2 || {};
+    const fu1 = activeRecord.firewoodUsage?.drier1 || {};
+    const fu2 = activeRecord.firewoodUsage?.drier2 || {};
+
+    const u1 = {
+      f: Number(fu1.f) || Number(dr1.ffrw1) || 0,
+      rf: Number(fu1.rf) || Number(dr1.ffrw2) || 0,
+      w: Number(fu1.w) || Number(dr1.ffrw3) || 0,
+      extra: Number(dr1.ffrw4) || 0,
+    };
+    u1.total = u1.f + u1.rf + u1.w + u1.extra;
+
+    const u2 = {
+      f: Number(fu2.f) || Number(dr2.ffrw1) || 0,
+      rf: Number(fu2.rf) || Number(dr2.ffrw2) || 0,
+      w: Number(fu2.w) || Number(dr2.ffrw3) || 0,
+      extra: Number(dr2.ffrw4) || 0,
+    };
+    u2.total = u2.f + u2.rf + u2.w + u2.extra;
+
+    const uTotal = {
+      f: u1.f + u2.f,
+      rf: u1.rf + u2.rf,
+      w: u1.w + u2.w,
+      extra: u1.extra + u2.extra,
+      total: u1.total + u2.total,
+    };
+
+    const fo1 = activeRecord.firewoodOutput?.drier1 || {};
+    const fo2 = activeRecord.firewoodOutput?.drier2 || {};
+
+    const out1 = {
+      withoutWithering: Number(fo1.withoutWithering) || 0,
+      withering: Number(fo1.withWithering) || 0,
+      rf: Number(fo1.rf) || 0,
+    };
+    out1.total = out1.withoutWithering + out1.withering + out1.rf;
+
+    const out2 = {
+      withoutWithering: Number(fo2.withoutWithering) || 0,
+      withering: Number(fo2.withWithering) || 0,
+      rf: Number(fo2.rf) || 0,
+    };
+    out2.total = out2.withoutWithering + out2.withering + out2.rf;
+
+    const outTotal = {
+      withoutWithering: out1.withoutWithering + out2.withoutWithering,
+      withering: out1.withering + out2.withering,
+      rf: out1.rf + out2.rf,
+      total: out1.total + out2.total,
+    };
+
+    const d1Dur = calculateDuration(dr1.start, dr1.finish);
+    const d2Dur = calculateDuration(dr2.start, dr2.finish);
+
+    const h1 =
+      Number(dr1.totalHours) > 0
+        ? Number(dr1.totalHours)
+        : d1Dur.decimal > 0
+          ? d1Dur.decimal
+          : Number(dr1.periodDecimal) || 0;
+
+    const h2 =
+      Number(dr2.totalHours) > 0
+        ? Number(dr2.totalHours)
+        : d2Dur.decimal > 0
+          ? d2Dur.decimal
+          : Number(dr2.periodDecimal) || 0;
+
+    const hTotal = parseFloat((h1 + h2).toFixed(2));
+
+    const slot1TeaTotal =
+      activeAllocation.slot1Dhool === "drier2" ? d2Total : d1Total;
+    const slot2TeaTotal =
+      activeAllocation.slot2Dhool === "drier1" ? d1Total : d2Total;
+
+    const outPerH1 =
+      h1 > 0
+        ? (slot1TeaTotal / h1).toFixed(2)
+        : Number(dr1.outputPerHour)
+          ? Number(dr1.outputPerHour).toFixed(2)
+          : "0.00";
+
+    const outPerH2 =
+      h2 > 0
+        ? (slot2TeaTotal / h2).toFixed(2)
+        : Number(dr2.outputPerHour)
+          ? Number(dr2.outputPerHour).toFixed(2)
+          : "0.00";
+
+    const fc1 = activeRecord.firewoodCost?.drier1 || {};
+    const fc2 = activeRecord.firewoodCost?.drier2 || {};
+
+    const c1 = {
+      fwKg: Number(fc1.totalFwKg) || 0,
+      unitPrice: Number(fc1.unitPrice) || 0,
+      madeTeaKg: Number(fc1.madeTeaKg) || 0,
+    };
+    c1.cost = c1.fwKg * c1.unitPrice;
+
+    const c2 = {
+      fwKg: Number(fc2.totalFwKg) || 0,
+      unitPrice: Number(fc2.unitPrice) || 0,
+      madeTeaKg: Number(fc2.madeTeaKg) || 0,
+    };
+    c2.cost = c2.fwKg * c2.unitPrice;
+
+    const cTotal = {
+      fwKg: c1.fwKg + c2.fwKg,
+      unitPrice:
+        c1.fwKg + c2.fwKg > 0 ? (c1.cost + c2.cost) / (c1.fwKg + c2.fwKg) : 0,
+      madeTeaKg: c1.madeTeaKg + c2.madeTeaKg,
+      cost: c1.cost + c2.cost,
+    };
+
+    return {
+      d1Items,
+      d1Total,
+      d2Items,
+      d2Total,
+      totalItems,
+      grandTotalFired,
+      u1,
+      u2,
+      uTotal,
+      out1,
+      out2,
+      outTotal,
+      d1Dur,
+      d2Dur,
+      h1,
+      h2,
+      hTotal,
+      slot1TeaTotal,
+      slot2TeaTotal,
+      outPerH1,
+      outPerH2,
+      c1,
+      c2,
+      cTotal,
+    };
+  }, [activeRecord, activeAllocation]);
+
+  const resolvedCropDate = useMemo(() => {
+    return (
+      normalizeDate(activeRecord?.cropDate) ||
+      normalizeDate(activeRecord?.drier1?.day) ||
+      "-"
+    );
+  }, [activeRecord]);
+
+  const docRefCode = `DRS/${(normalizeDate(activeRecord?.dateOfManufacture) || filterDate || "").replace(/-/g, "")}`;
+
+  const pdfHeaders = useMemo(
+    () => [
+      [
+        {
+          content: "DHOOLS (kg) - 01",
+          colSpan: 3,
+          styles: {
+            halign: "center",
+            fillColor: [239, 246, 255],
+            textColor: [30, 64, 175],
+            fontStyle: "bold",
+            lineWidth: 0.2,
+            lineColor: [182, 176, 159],
+          },
+        },
+        {
+          content: "DHOOLS (kg) - 02",
+          colSpan: 3,
+          styles: {
+            halign: "center",
+            fillColor: [236, 253, 245],
+            textColor: [6, 95, 70],
+            fontStyle: "bold",
+            lineWidth: 0.2,
+            lineColor: [182, 176, 159],
+          },
+        },
+        {
+          content: "DHOOLS (kg) TOTAL",
+          colSpan: 3,
+          styles: {
+            halign: "center",
+            fillColor: [255, 251, 235],
+            textColor: [146, 64, 14],
+            fontStyle: "bold",
+            lineWidth: 0.2,
+            lineColor: [182, 176, 159],
+          },
+        },
+      ],
+      [
+        {
+          content: "Item",
+          styles: {
+            halign: "center",
+            fillColor: [248, 250, 252],
+            textColor: [0, 0, 0],
+            fontStyle: "bold",
+            lineWidth: 0.2,
+            lineColor: [182, 176, 159],
+          },
+        },
+        {
+          content: "Kg",
+          styles: {
+            halign: "center",
+            fillColor: [248, 250, 252],
+            textColor: [0, 0, 0],
+            fontStyle: "bold",
+            lineWidth: 0.2,
+            lineColor: [182, 176, 159],
+          },
+        },
+        {
+          content: "%",
+          styles: {
+            halign: "center",
+            fillColor: [248, 250, 252],
+            textColor: [0, 0, 0],
+            fontStyle: "bold",
+            lineWidth: 0.2,
+            lineColor: [182, 176, 159],
+          },
+        },
+        {
+          content: "Item",
+          styles: {
+            halign: "center",
+            fillColor: [248, 250, 252],
+            textColor: [0, 0, 0],
+            fontStyle: "bold",
+            lineWidth: 0.2,
+            lineColor: [182, 176, 159],
+          },
+        },
+        {
+          content: "Kg",
+          styles: {
+            halign: "center",
+            fillColor: [248, 250, 252],
+            textColor: [0, 0, 0],
+            fontStyle: "bold",
+            lineWidth: 0.2,
+            lineColor: [182, 176, 159],
+          },
+        },
+        {
+          content: "%",
+          styles: {
+            halign: "center",
+            fillColor: [248, 250, 252],
+            textColor: [0, 0, 0],
+            fontStyle: "bold",
+            lineWidth: 0.2,
+            lineColor: [182, 176, 159],
+          },
+        },
+        {
+          content: "Item",
+          styles: {
+            halign: "center",
+            fillColor: [248, 250, 252],
+            textColor: [0, 0, 0],
+            fontStyle: "bold",
+            lineWidth: 0.2,
+            lineColor: [182, 176, 159],
+          },
+        },
+        {
+          content: "Kg",
+          styles: {
+            halign: "center",
+            fillColor: [248, 250, 252],
+            textColor: [0, 0, 0],
+            fontStyle: "bold",
+            lineWidth: 0.2,
+            lineColor: [182, 176, 159],
+          },
+        },
+        {
+          content: "%",
+          styles: {
+            halign: "center",
+            fillColor: [248, 250, 252],
+            textColor: [0, 0, 0],
+            fontStyle: "bold",
+            lineWidth: 0.2,
+            lineColor: [182, 176, 159],
+          },
+        },
+      ],
+    ],
+    [],
+  );
+
+  const pdfData = useMemo(() => {
+    if (!activeRecord || !calcData) return [];
+
+    const rows = [];
+
+    const grades = [
+      { l1: "1ST", l2: "1ST", l3: "1ST", k: "first" },
+      { l1: "2ND", l2: "2ND", l3: "2ND", k: "second" },
+      { l1: "3RD", l2: "3RD", l3: "3RD", k: "third" },
+      { l1: "DIR / R", l2: "DIR / R", l3: "DIR / R", k: "dir" },
+      { l1: "G BULK", l2: "BIG BULK", l3: "BIG BULK", k: "bigBulk" },
+    ];
+
+    grades.forEach((g) => {
+      const d1Kg = calcData.d1Items[g.k];
+      const d1Pct =
+        calcData.d1Total > 0
+          ? ((d1Kg / calcData.d1Total) * 100).toFixed(2)
+          : "0.00";
+
+      const d2Kg = calcData.d2Items[g.k];
+      const d2Pct =
+        calcData.d2Total > 0
+          ? ((d2Kg / calcData.d2Total) * 100).toFixed(2)
+          : "0.00";
+
+      const totKg = calcData.totalItems[g.k];
+      const totPct =
+        calcData.grandTotalFired > 0
+          ? ((totKg / calcData.grandTotalFired) * 100).toFixed(2)
+          : "0.00";
+
+      rows.push([
+        g.l1,
+        d1Kg > 0 ? d1Kg.toFixed(2) : "0.00",
+        d1Pct,
+        g.l2,
+        d2Kg > 0 ? d2Kg.toFixed(2) : "0.00",
+        d2Pct,
+        g.l3,
+        totKg > 0 ? totKg.toFixed(2) : "0.00",
+        totPct,
+      ]);
+    });
+
+    rows.push([
+      {
+        content: "TOTAL FIRED TEA",
+        styles: { fontStyle: "bold", fillColor: [248, 250, 252] },
+      },
+      {
+        content: calcData.d1Total.toFixed(2),
+        styles: {
+          fontStyle: "bold",
+          textColor: [30, 64, 175],
+          fillColor: [248, 250, 252],
+        },
+      },
+      {
+        content: "100.0",
+        styles: { fontStyle: "bold", fillColor: [248, 250, 252] },
+      },
+      {
+        content: "TOTAL FIRED TEA",
+        styles: { fontStyle: "bold", fillColor: [248, 250, 252] },
+      },
+      {
+        content: calcData.d2Total.toFixed(2),
+        styles: {
+          fontStyle: "bold",
+          textColor: [6, 95, 70],
+          fillColor: [248, 250, 252],
+        },
+      },
+      {
+        content: "100.0",
+        styles: { fontStyle: "bold", fillColor: [248, 250, 252] },
+      },
+      {
+        content: "TOTAL FIRED TEA",
+        styles: { fontStyle: "bold", fillColor: [248, 250, 252] },
+      },
+      {
+        content: calcData.grandTotalFired.toFixed(2),
+        styles: {
+          fontStyle: "bold",
+          textColor: [146, 64, 14],
+          fillColor: [248, 250, 252],
+        },
+      },
+      {
+        content: "100.0",
+        styles: { fontStyle: "bold", fillColor: [248, 250, 252] },
+      },
+    ]);
+
+    rows.push([
+      {
+        content: `FIREWOOD USAGE (kg) - 01 (${slot1DhoolLabel})`,
+        colSpan: 3,
+        styles: {
+          halign: "center",
+          fillColor: [239, 246, 255],
+          textColor: [30, 64, 175],
+          fontStyle: "bold",
+        },
+      },
+      {
+        content: `FIREWOOD USAGE (kg) - 02 (${slot2DhoolLabel})`,
+        colSpan: 3,
+        styles: {
+          halign: "center",
+          fillColor: [236, 253, 245],
+          textColor: [6, 95, 70],
+          fontStyle: "bold",
+        },
+      },
+      {
+        content: "FIREWOOD USAGE (kg) TOTAL",
+        colSpan: 3,
+        styles: {
+          halign: "center",
+          fillColor: [255, 251, 235],
+          textColor: [146, 64, 14],
+          fontStyle: "bold",
+        },
+      },
+    ]);
+    rows.push([
+      {
+        content: "F / EXTRA",
+        styles: { fontStyle: "bold", fillColor: [248, 250, 252] },
+      },
+      {
+        content: "R/F",
+        styles: { fontStyle: "bold", fillColor: [248, 250, 252] },
+      },
+      {
+        content: "W / TOTAL",
+        styles: { fontStyle: "bold", fillColor: [248, 250, 252] },
+      },
+      {
+        content: "F / EXTRA",
+        styles: { fontStyle: "bold", fillColor: [248, 250, 252] },
+      },
+      {
+        content: "R/F",
+        styles: { fontStyle: "bold", fillColor: [248, 250, 252] },
+      },
+      {
+        content: "W / TOTAL",
+        styles: { fontStyle: "bold", fillColor: [248, 250, 252] },
+      },
+      {
+        content: "F / EXTRA",
+        styles: { fontStyle: "bold", fillColor: [248, 250, 252] },
+      },
+      {
+        content: "R/F",
+        styles: { fontStyle: "bold", fillColor: [248, 250, 252] },
+      },
+      {
+        content: "W / TOTAL",
+        styles: { fontStyle: "bold", fillColor: [248, 250, 252] },
+      },
+    ]);
+    rows.push([
+      `${calcData.u1.f} / ${calcData.u1.extra}`,
+      String(calcData.u1.rf),
+      `${calcData.u1.w} / ${calcData.u1.total}`,
+      `${calcData.u2.f} / ${calcData.u2.extra}`,
+      String(calcData.u2.rf),
+      `${calcData.u2.w} / ${calcData.u2.total}`,
+      `${calcData.uTotal.f} / ${calcData.uTotal.extra}`,
+      String(calcData.uTotal.rf),
+      `${calcData.uTotal.w} / ${calcData.uTotal.total}`,
+    ]);
+
+    rows.push([
+      {
+        content: `FIREWOOD OUTPUT - 01 (${slot1DhoolLabel})`,
+        colSpan: 3,
+        styles: {
+          halign: "center",
+          fillColor: [239, 246, 255],
+          textColor: [30, 64, 175],
+          fontStyle: "bold",
+        },
+      },
+      {
+        content: `FIREWOOD OUTPUT - 02 (${slot2DhoolLabel})`,
+        colSpan: 3,
+        styles: {
+          halign: "center",
+          fillColor: [236, 253, 245],
+          textColor: [6, 95, 70],
+          fontStyle: "bold",
+        },
+      },
+      {
+        content: "FIREWOOD OUTPUT TOTAL",
+        colSpan: 3,
+        styles: {
+          halign: "center",
+          fillColor: [255, 251, 235],
+          textColor: [146, 64, 14],
+          fontStyle: "bold",
+        },
+      },
+    ]);
+
+    const foData = [
+      [
+        "WITHOUT WITHERING",
+        `${calcData.out1.withoutWithering.toFixed(2)} kg`,
+        "WITHOUT WITHERING",
+        `${calcData.out2.withoutWithering.toFixed(2)} kg`,
+        "WITHOUT WITHERING",
+        `${calcData.outTotal.withoutWithering.toFixed(2)} kg`,
+      ],
+      [
+        "WITH WITHERING",
+        `${calcData.out1.withering.toFixed(2)} kg`,
+        "WITH WITHERING",
+        `${calcData.out2.withering.toFixed(2)} kg`,
+        "WITH WITHERING",
+        `${calcData.outTotal.withering.toFixed(2)} kg`,
+      ],
+      [
+        "R/F",
+        `${calcData.out1.rf.toFixed(2)} kg`,
+        "R/F",
+        `${calcData.out2.rf.toFixed(2)} kg`,
+        "R/F",
+        `${calcData.outTotal.rf.toFixed(2)} kg`,
+      ],
+      [
+        "TOTAL OUTPUT",
+        `${calcData.out1.total.toFixed(2)} kg`,
+        "TOTAL OUTPUT",
+        `${calcData.out2.total.toFixed(2)} kg`,
+        "TOTAL OUTPUT",
+        `${calcData.outTotal.total.toFixed(2)} kg`,
+      ],
+    ];
+
+    foData.forEach((r) => {
+      rows.push([
+        { content: r[0], colSpan: 2, styles: { fontStyle: "bold" } },
+        { content: r[1] },
+        { content: r[2], colSpan: 2, styles: { fontStyle: "bold" } },
+        { content: r[3] },
+        { content: r[4], colSpan: 2, styles: { fontStyle: "bold" } },
+        {
+          content: r[5],
+          styles: { fontStyle: "bold", textColor: [146, 64, 14] },
+        },
+      ]);
+    });
+
+    rows.push([
+      {
+        content: `DRIER - 01 (${slot1DhoolLabel})`,
+        colSpan: 3,
+        styles: {
+          halign: "center",
+          fillColor: [239, 246, 255],
+          textColor: [30, 64, 175],
+          fontStyle: "bold",
+        },
+      },
+      {
+        content: `DRIER - 02 (${slot2DhoolLabel})`,
+        colSpan: 3,
+        styles: {
+          halign: "center",
+          fillColor: [236, 253, 245],
+          textColor: [6, 95, 70],
+          fontStyle: "bold",
+        },
+      },
+      {
+        content: "TOTAL",
+        colSpan: 3,
+        styles: {
+          halign: "center",
+          fillColor: [255, 251, 235],
+          textColor: [146, 64, 14],
+          fontStyle: "bold",
+        },
+      },
+    ]);
+
+    rows.push([
+      { content: "START TIME", colSpan: 2, styles: { fontStyle: "bold" } },
+      { content: activeRecord.drier1?.start || "-" },
+      { content: "START TIME", colSpan: 2, styles: { fontStyle: "bold" } },
+      { content: activeRecord.drier2?.start || "-" },
+      { content: "", colSpan: 3, styles: { fillColor: [248, 250, 252] } },
+    ]);
+    rows.push([
+      { content: "END TIME", colSpan: 2, styles: { fontStyle: "bold" } },
+      { content: activeRecord.drier1?.finish || "-" },
+      { content: "END TIME", colSpan: 2, styles: { fontStyle: "bold" } },
+      { content: activeRecord.drier2?.finish || "-" },
+      { content: "", colSpan: 3, styles: { fillColor: [248, 250, 252] } },
+    ]);
+    rows.push([
+      { content: "TOTAL HOURS", colSpan: 2, styles: { fontStyle: "bold" } },
+      { content: `${calcData.h1} h` },
+      { content: "TOTAL HOURS", colSpan: 2, styles: { fontStyle: "bold" } },
+      { content: `${calcData.h2} h` },
+      { content: "TOTAL HOURS", colSpan: 2, styles: { fontStyle: "bold" } },
+      {
+        content: `${calcData.hTotal} h`,
+        styles: { fontStyle: "bold", textColor: [146, 64, 14] },
+      },
+    ]);
+    rows.push([
+      {
+        content: "DRIER OUTPUT / H",
+        colSpan: 2,
+        styles: { fontStyle: "bold" },
+      },
+      {
+        content: `${calcData.outPerH1} kg`,
+        styles: { fontStyle: "bold", textColor: [30, 64, 175] },
+      },
+      {
+        content: "DRIER OUTPUT / H",
+        colSpan: 2,
+        styles: { fontStyle: "bold" },
+      },
+      {
+        content: `${calcData.outPerH2} kg`,
+        styles: { fontStyle: "bold", textColor: [6, 95, 70] },
+      },
+      { content: "", colSpan: 3, styles: { fillColor: [248, 250, 252] } },
+    ]);
+
+    rows.push([
+      {
+        content: `DRIER - 01 (${slot1DhoolLabel})`,
+        colSpan: 3,
+        styles: {
+          halign: "center",
+          fillColor: [239, 246, 255],
+          textColor: [30, 64, 175],
+          fontStyle: "bold",
+        },
+      },
+      {
+        content: `DRIER - 02 (${slot2DhoolLabel})`,
+        colSpan: 3,
+        styles: {
+          halign: "center",
+          fillColor: [236, 253, 245],
+          textColor: [6, 95, 70],
+          fontStyle: "bold",
+        },
+      },
+      {
+        content: "TOTAL",
+        colSpan: 3,
+        styles: {
+          halign: "center",
+          fillColor: [255, 251, 235],
+          textColor: [146, 64, 14],
+          fontStyle: "bold",
+        },
+      },
+    ]);
+
+    const cfData = [
+      [
+        "TOTAL F/W KG",
+        `${calcData.c1.fwKg.toFixed(2)} kg`,
+        "TOTAL F/W KG",
+        `${calcData.c2.fwKg.toFixed(2)} kg`,
+        "TOTAL F/W KG",
+        `${calcData.cTotal.fwKg.toFixed(2)} kg`,
+      ],
+      [
+        "UNIT PRICE (Rs.)",
+        `Rs. ${calcData.c1.unitPrice.toFixed(2)}`,
+        "UNIT PRICE (Rs.)",
+        `Rs. ${calcData.c2.unitPrice.toFixed(2)}`,
+        "AVG UNIT PRICE",
+        `Rs. ${calcData.cTotal.unitPrice.toFixed(2)}`,
+      ],
+      [
+        "MADE TEA KG",
+        `${calcData.c1.madeTeaKg.toFixed(2)} kg`,
+        "MADE TEA KG",
+        `${calcData.c2.madeTeaKg.toFixed(2)} kg`,
+        "MADE TEA KG",
+        `${calcData.cTotal.madeTeaKg.toFixed(2)} kg`,
+      ],
+      [
+        "COST OF F/W (Rs.)",
+        `Rs. ${calcData.c1.cost.toFixed(2)}`,
+        "COST OF F/W (Rs.)",
+        `Rs. ${calcData.c2.cost.toFixed(2)}`,
+        "COST OF F/W (Rs.)",
+        `Rs. ${calcData.cTotal.cost.toFixed(2)}`,
+      ],
+    ];
+
+    cfData.forEach((r, idx) => {
+      rows.push([
+        { content: r[0], colSpan: 2, styles: { fontStyle: "bold" } },
+        {
+          content: r[1],
+          styles:
+            idx === 3 ? { textColor: [30, 64, 175], fontStyle: "bold" } : {},
+        },
+        { content: r[2], colSpan: 2, styles: { fontStyle: "bold" } },
+        {
+          content: r[3],
+          styles:
+            idx === 3 ? { textColor: [6, 95, 70], fontStyle: "bold" } : {},
+        },
+        { content: r[4], colSpan: 2, styles: { fontStyle: "bold" } },
+        {
+          content: r[5],
+          styles: { fontStyle: "bold", textColor: [146, 64, 14] },
+        },
+      ]);
+    });
+
+    return rows;
+  }, [activeRecord, calcData, slot1DhoolLabel, slot2DhoolLabel]);
+
+  const autoTableOptions = useMemo(
+    () => ({
+      startY: 56,
+      margin: { top: 12, bottom: 12, left: 12, right: 12 },
+      theme: "grid",
+      styles: {
+        fontSize: 7.0,
+        cellPadding: 1.6,
+        valign: "middle",
+        halign: "center",
+        lineColor: [182, 176, 159],
+        lineWidth: 0.18,
+        textColor: [0, 0, 0],
+      },
+      didDrawPage: (hookData) => {
+        if (hookData.pageNumber !== 1) return;
+
+        const { doc } = hookData;
+        const startX = 12;
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const contentWidth = pageWidth - 24;
+
+        doc.setFontSize(18);
+        doc.setTextColor(0, 0, 0);
+        doc.setFont(undefined, "bold");
+        doc.text("DRIER ROOM RECORD SHEET", pageWidth / 2, 46, {
+          align: "center",
+        });
+        doc.setLineWidth(0.4);
+
+        doc.setFontSize(8);
+        doc.text("M/F DATE   :  ", startX, 36);
+        if (activeRecord?.dateOfManufacture) {
+          doc.setFont(undefined, "bold");
+          doc.text(
+            normalizeDate(activeRecord.dateOfManufacture),
+            startX + 22,
+            35.6,
+          );
+        }
+
+        doc.setFont(undefined, "bold");
+        doc.text("CROP DATE :  ", startX, 43);
+        if (resolvedCropDate && resolvedCropDate !== "-") {
+          doc.text(resolvedCropDate, startX + 22, 42.6);
+        }
+
+        doc.text("CROP (Kg)  :   ", startX, 50);
+        if (calcData?.grandTotalFired) {
+          doc.text(
+            `${(calcData.grandTotalFired * 4.2).toFixed(2)} kg`,
+            startX + 22,
+            49.6,
+          );
+        }
+
+        const tableFinalY = doc.lastAutoTable ? doc.lastAutoTable.finalY : 230;
+        const bBoxY = tableFinalY - 4;
+        const bBoxH = 17;
+
+        doc.setDrawColor(182, 176, 159);
+        doc.setLineWidth(0.3);
+        doc.setFillColor(250, 250, 250);
+        doc.roundedRect(
+          startX + 12,
+          bBoxY,
+          contentWidth - 24,
+          bBoxH,
+          2,
+          2,
+          "FD",
+        );
+
+        const bRows = [
+          ["Firewood output", "WITHOUT WITHERING 1KG FIREWOOD (MAXIMUM)"],
+          ["1kg F/T", "WITH WITHERING 1.2KG FIREWOOD (MAXIMUM)"],
+          ["DRIER OUTPUT", "WITHOUT WITHERING 200 (MINIMUM)"],
+          ["1 YARD", "WITH WITHERING 180 (MINIMUM)"],
+        ];
+
+        bRows.forEach((br, bIdx) => {
+          const curY = bBoxY + 3.6 + bIdx * 3.6;
+          doc.setFontSize(6.5);
+          doc.setFont(undefined, "bold");
+          doc.setTextColor(182, 176, 159);
+          doc.text(br[0], startX + 20, curY);
+
+          doc.setLineWidth(0.2);
+          doc.line(startX + 52, curY - 0.8, startX + 64, curY - 0.8);
+          doc.line(startX + 62, curY - 1.8, startX + 64, curY - 0.8);
+          doc.line(startX + 62, curY + 0.2, startX + 64, curY - 0.8);
+
+          doc.text(br[1], startX + 70, curY);
+        });
+      },
+    }),
+    [activeRecord, calcData, resolvedCropDate],
+  );
+
+  const handleSaveInline = async () => {
+    if (!editForm || !editForm._id) {
+      toast.error("Invalid record identifier.");
+      return;
+    }
+
+    const toastId = toast.loading("Saving changes...");
+    setIsSaving(true);
+
+    try {
+      const token = localStorage.getItem("token");
+
+      const d1 = editForm.dhools?.drier1 || {};
+      const d2 = editForm.dhools?.drier2 || {};
+      const d1Total =
+        (Number(d1.first) || 0) +
+        (Number(d1.second) || 0) +
+        (Number(d1.third) || 0) +
+        (Number(d1.dir) || 0) +
+        (Number(d1.bigBulk) || 0);
+      const d2Total =
+        (Number(d2.first) || 0) +
+        (Number(d2.second) || 0) +
+        (Number(d2.third) || 0) +
+        (Number(d2.dir) || 0) +
+        (Number(d2.bigBulk) || 0);
+
+      const d1Dur = calculateDuration(
+        editForm.drier1?.start,
+        editForm.drier1?.finish,
+      );
+      const d2Dur = calculateDuration(
+        editForm.drier2?.start,
+        editForm.drier2?.finish,
+      );
+
+      const curAllocation = editForm.allocation || {
+        slot1Dhool: "drier1",
+        slot2Dhool: "drier2",
+      };
+      const slot1TeaTotal =
+        curAllocation.slot1Dhool === "drier2" ? d2Total : d1Total;
+      const slot2TeaTotal =
+        curAllocation.slot2Dhool === "drier1" ? d1Total : d2Total;
+
+      const outPerH1 =
+        d1Dur.decimal > 0
+          ? parseFloat((slot1TeaTotal / d1Dur.decimal).toFixed(2))
+          : 0;
+      const outPerH2 =
+        d2Dur.decimal > 0
+          ? parseFloat((slot2TeaTotal / d2Dur.decimal).toFixed(2))
+          : 0;
+
+      const c1Cost =
+        (Number(editForm.firewoodCost?.drier1?.totalFwKg) || 0) *
+        (Number(editForm.firewoodCost?.drier1?.unitPrice) || 0);
+      const c2Cost =
+        (Number(editForm.firewoodCost?.drier2?.totalFwKg) || 0) *
+        (Number(editForm.firewoodCost?.drier2?.unitPrice) || 0);
+
+      const payload = {
+        ...editForm,
+        allocation: curAllocation,
+        cropDate: editForm.cropDate,
+        drier1: {
+          ...editForm.drier1,
+          allocatedDhool: curAllocation.slot1Dhool,
+          allocatedDhoolLabel:
+            curAllocation.slot1Dhool === "drier1" ? "Dhool 01" : "Dhool 02",
+          day: editForm.cropDate,
+          ffrw1: editForm.firewoodUsage?.drier1?.f || 0,
+          ffrw2: editForm.firewoodUsage?.drier1?.rf || 0,
+          ffrw3: editForm.firewoodUsage?.drier1?.w || 0,
+          periodStr: d1Dur.str,
+          periodDecimal: d1Dur.decimal,
+          totalHours: d1Dur.decimal,
+          outputPerHour: outPerH1,
+        },
+        drier2: {
+          ...editForm.drier2,
+          allocatedDhool: curAllocation.slot2Dhool,
+          allocatedDhoolLabel:
+            curAllocation.slot2Dhool === "drier1" ? "Dhool 01" : "Dhool 02",
+          day: editForm.cropDate,
+          ffrw1: editForm.firewoodUsage?.drier2?.f || 0,
+          ffrw2: editForm.firewoodUsage?.drier2?.rf || 0,
+          ffrw3: editForm.firewoodUsage?.drier2?.w || 0,
+          periodStr: d2Dur.str,
+          periodDecimal: d2Dur.decimal,
+          totalHours: d2Dur.decimal,
+          outputPerHour: outPerH2,
+        },
+        summary: {
+          d1TotalFired: slot1TeaTotal,
+          d2TotalFired: slot2TeaTotal,
+          rawDhool1Total: d1Total,
+          rawDhool2Total: d2Total,
+          grandTotalFiredTea: d1Total + d2Total,
+          d1FwCost: c1Cost,
+          d2FwCost: c2Cost,
+        },
+      };
+
+      const response = await fetch(
+        `${BACKEND_URL}/api/firing-section/${editForm._id}`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        },
+      );
+
+      const resData = await response.json();
+      if (response.ok && resData.success) {
+        toast.success("Drier record updated successfully!", { id: toastId });
+        setAllRecords((prev) =>
+          prev.map((rec) =>
+            rec._id === editForm._id ? resData.data || payload : rec,
+          ),
+        );
+        setIsEditing(false);
+        setEditForm(null);
+        setIsDirty(false);
+      } else {
+        toast.error(resData.message || "Failed to update record.", {
+          id: toastId,
+        });
+      }
+    } catch (err) {
+      console.error("Save error:", err);
+      toast.error("Error communicating with server.", { id: toastId });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const inlineInput =
+    "w-full bg-white dark:bg-slate-800 border border-orange-400/80 dark:border-orange-500/80 text-slate-900 dark:text-slate-100 rounded-md px-1.5 py-1 text-xs text-center font-bold outline-none ring-2 ring-orange-500/10 focus:ring-orange-500 transition-all";
+
+  return (
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 p-4 md:p-8 font-sans transition-colors duration-200">
+      <div className="max-w-7xl mx-auto flex flex-col gap-6">
+        {isDirty && (
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-red-100 dark:bg-red-900/40 border-2 border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.4)] p-4 rounded-2xl animate-pulse transition-all">
+            <div className="flex items-center gap-3 w-full sm:w-auto">
+              <AlertTriangle
+                size={28}
+                className="text-red-600 dark:text-red-400 animate-bounce shrink-0"
+              />
+              <div>
+                <h3 className="text-red-800 dark:text-red-300 font-black text-sm sm:text-base uppercase tracking-wider">
+                  Unsaved Changes Detected!
+                </h3>
+                <p className="text-red-600 dark:text-red-400 text-xs sm:text-sm font-semibold">
+                  Please save your data to prevent data loss.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={handleSaveInline}
+              disabled={isSaving}
+              className="w-full sm:w-auto bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 px-6 rounded-xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 whitespace-nowrap disabled:opacity-50"
+            >
+              {isSaving ? (
+                <RefreshCw size={18} className="animate-spin" />
+              ) : (
+                <Save size={18} />
+              )}{" "}
+              Save Now
+            </button>
+          </div>
+        )}
+
+        {/* --- Top Header Bar --- */}
+        <div className="relative overflow-hidden bg-white/90 dark:bg-slate-900/90 backdrop-blur-md p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
+          <div className="absolute -right-10 -bottom-10 w-48 h-48 bg-orange-500/5 rounded-full blur-2xl pointer-events-none" />
+
+          <div className="flex items-center gap-3.5 z-10">
+            <div className="p-3 bg-gradient-to-br from-orange-600 via-amber-600 to-slate-900 text-white rounded-2xl shadow-md shadow-orange-900/10 ring-4 ring-orange-50 dark:ring-orange-950/40">
+              <Flame className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="text-xl md:text-2xl font-black text-slate-900 dark:text-white tracking-tight uppercase">
+                  {t.title}
+                </h1>
+                {isEditing ? (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2.5 py-0.5 bg-amber-500 text-white rounded-full shadow-xs animate-pulse">
+                    <Edit3 className="w-3 h-3" /> In-Place Edit Mode
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2.5 py-0.5 bg-orange-50 dark:bg-orange-950/60 text-orange-700 dark:text-orange-300 rounded-full border border-orange-200/60 dark:border-orange-800/60">
+                    <Sparkles className="w-3 h-3 text-orange-500" /> Operational Record
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-medium">
+                {t.subtitle}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5 w-full xl:w-auto justify-start xl:justify-end z-10">
+            {currentRecord &&
+              (!isEditing ? (
+                <button
+                  type="button"
+                  onClick={handleStartEdit}
+                  className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-2 shadow-xs cursor-pointer active:scale-95"
+                >
+                  <Edit3 size={15} />
+                  {t.editRecord}
+                </button>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCancelEdit}
+                    disabled={isSaving}
+                    className="px-3.5 py-2.5 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <RotateCcw size={14} />
+                    {t.cancelEdit}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveInline}
+                    disabled={isSaving}
+                    className="px-4 py-2.5 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-700 hover:to-amber-700 text-white font-black text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50"
+                  >
+                    <Save size={14} />
+                    {t.saveChanges}
+                  </button>
+                </div>
+              ))}
+
+            <PDFDownloader
+              title=""
+              subtitle=""
+              headers={pdfHeaders}
+              data={pdfData}
+              fileName={`Drier_Room_Record_Sheet_${lang}_MF_${normalizeDate(activeRecord?.dateOfManufacture) || filterDate || "Report"}.pdf`}
+              orientation="portrait"
+              uniqueCode={docRefCode}
+              userName={activeRecord?.officerName || currentUsername}
+              userRole={userRole}
+              autoTableOptions={autoTableOptions}
+              disabled={!activeRecord || pdfData.length === 0}
+            />
+
+            <button
+              type="button"
+              onClick={() => setLang(lang === "EN" ? "SI" : "EN")}
+              className="px-4 py-2.5 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-xl transition-all font-bold text-xs flex items-center gap-2 shadow-xs active:scale-95 cursor-pointer"
+            >
+              <Languages
+                size={15}
+                className="text-slate-500 dark:text-slate-400"
+              />
+              {lang === "EN" ? "සිංහල" : "English"}
+            </button>
+
+            <button
+              type="button"
+              onClick={fetchRecords}
+              disabled={loading || isEditing}
+              className="px-4 py-2.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-xl transition-all font-bold text-xs flex items-center gap-2 shadow-xs active:scale-95 cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw
+                size={14}
+                className={
+                  loading
+                    ? "animate-spin text-orange-600"
+                    : "text-slate-500 dark:text-slate-400"
+                }
+              />
+              {loading ? t.refreshing : t.sync}
+            </button>
+          </div>
+        </div>
+
+        {/* --- Date Filter Bar --- */}
+        {!isEditing && (
+          <div className="bg-white/90 dark:bg-slate-900/90 backdrop-blur-md p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-orange-50 dark:bg-orange-950/60 text-orange-700 dark:text-orange-300 rounded-xl">
+                <Filter className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="text-xs font-black text-slate-800 dark:text-slate-100 uppercase tracking-wider">
+                  {t.filterDay}
+                </span>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+                  Filter drier logs by tea manufacturing date (M/F Date)
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <input
+                type="date"
+                value={filterDate}
+                onChange={(e) => setFilterDate(e.target.value)}
+                className="w-full sm:w-auto bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 text-xs font-bold rounded-xl focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none px-3.5 py-2 transition-all"
+              />
+              {filterDate && (
+                <button
+                  onClick={() => setFilterDate("")}
+                  className="flex items-center gap-1 text-xs font-bold text-rose-600 dark:text-rose-400 hover:text-rose-700 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100/70 border border-rose-200/60 dark:border-rose-900/40 px-3 py-2 rounded-xl transition-colors cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" /> {t.clear}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* --- Main Dashboard Content --- */}
+        {loading && allRecords.length === 0 ? (
+          <div className="text-center py-28 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs">
+            <div className="w-10 h-10 border-4 border-orange-200 dark:border-orange-800 border-t-orange-600 rounded-full animate-spin mx-auto mb-4" />
+            <p className="text-slate-500 dark:text-slate-400 font-semibold text-xs uppercase tracking-wider">
+              Loading drier room record sheet...
+            </p>
+          </div>
+        ) : !currentRecord ? (
+          <div className="text-center py-24 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs">
+            <div className="w-14 h-14 bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 rounded-2xl flex items-center justify-center mx-auto mb-3">
+              <Package className="w-7 h-7" />
+            </div>
+            <h3 className="text-base font-black text-slate-800 dark:text-slate-100 uppercase tracking-wide">
+              {t.noRecordFound}
+            </h3>
+            <p className="text-slate-500 dark:text-slate-400 text-xs mt-1 max-w-sm mx-auto font-medium">
+              {t.noRecordDesc}
+            </p>
+          </div>
+        ) : (
+          <div
+            className={`bg-white dark:bg-slate-900 rounded-3xl border shadow-sm p-6 md:p-10 overflow-hidden font-sans transition-colors duration-200 flex flex-col gap-8 ${isEditing ? "border-orange-400 ring-2 ring-orange-400/20" : "border-slate-200/90 dark:border-slate-800"}`}
+          >
+            {/* Title Header & Editable Metadata */}
+            <div className="text-center pb-6 border-b border-slate-100 dark:border-slate-800">
+              {isEditing && (
+                <div className="inline-flex items-center gap-2 bg-orange-100 text-orange-800 px-4 py-1.5 rounded-full font-bold text-sm mb-4 animate-pulse">
+                  <Edit size={16} /> EDITING MODE ACTIVE
+                </div>
+              )}
+              <h2 className="text-2xl sm:text-3xl font-black tracking-wider text-slate-900 dark:text-white uppercase">
+                DRIER ROOM RECORD SHEET
+              </h2>
+              <div className="flex flex-wrap justify-center items-center gap-6 mt-3 text-xs font-bold text-slate-600 dark:text-slate-400">
+                <div className="flex items-center gap-1.5">
+                  {t.mfDate} :{" "}
+                  {isEditing ? (
+                    <input
+                      type="date"
+                      value={editForm.dateOfManufacture}
+                      onChange={(e) => {
+                        setIsDirty(true);
+                        setEditForm((prev) => ({
+                          ...prev,
+                          dateOfManufacture: e.target.value,
+                        }));
+                      }}
+                      className="bg-orange-50 dark:bg-slate-800 border border-orange-300 dark:border-orange-700 rounded-md px-2 py-0.5 text-xs font-black text-slate-900 dark:text-white outline-none"
+                    />
+                  ) : (
+                    <span className="text-slate-900 dark:text-white font-extrabold">
+                      {normalizeDate(activeRecord.dateOfManufacture)}
+                    </span>
+                  )}
+                </div>
+                <div>•</div>
+                <div className="flex items-center gap-1.5">
+                  {t.cropDate} :{" "}
+                  {isEditing ? (
+                    <input
+                      type="date"
+                      value={editForm.cropDate}
+                      onChange={(e) => {
+                        setIsDirty(true);
+                        setEditForm((prev) => ({
+                          ...prev,
+                          cropDate: e.target.value,
+                        }));
+                      }}
+                      className="bg-orange-50 dark:bg-slate-800 border border-orange-300 dark:border-orange-700 rounded-md px-2 py-0.5 text-xs font-black text-slate-900 dark:text-white outline-none"
+                    />
+                  ) : (
+                    <span className="text-slate-900 dark:text-white font-extrabold">
+                      {resolvedCropDate}
+                    </span>
+                  )}
+                </div>
+                <div>•</div>
+                <div className="flex items-center gap-1.5">
+                  {t.cropKg} :{" "}
+                  {isEditing ? (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        placeholder="0.00"
+                        onKeyDown={preventNegativeKeys}
+                        value={editForm.cropKg}
+                        onChange={(e) => {
+                          setIsDirty(true);
+                          setEditForm((prev) => ({
+                            ...prev,
+                            cropKg: e.target.value,
+                          }));
+                        }}
+                        className="w-24 bg-orange-50 dark:bg-slate-800 border border-orange-300 dark:border-orange-700 rounded-md px-2 py-0.5 text-xs font-black text-emerald-700 dark:text-emerald-400 outline-none text-center"
+                      />
+                      <span className="text-[10px] text-slate-400">kg</span>
+                    </div>
+                  ) : (
+                    <span className="text-emerald-700 dark:text-emerald-400 font-extrabold">
+                      {activeRecord.cropKg
+                        ? `${Number(activeRecord.cropKg).toFixed(2)} kg`
+                        : calcData?.grandTotalFired
+                          ? (calcData.grandTotalFired * 4.2).toFixed(2) + " kg"
+                          : "-"}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* 1. DHOOLS (kg) TABLE */}
+            <div>
+              <div className="w-full overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs">
+                <table className="w-full min-w-[850px] border-collapse text-center text-xs">
+                  <thead>
+                    <tr className="bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-extrabold uppercase border-b border-slate-200 dark:border-slate-700">
+                      <th
+                        colSpan={3}
+                        className="p-3 bg-blue-100/90 dark:bg-blue-950/80 text-blue-950 dark:text-blue-200 border-r border-slate-200 dark:border-slate-700 font-black"
+                      >
+                        {t.drier1}
+                      </th>
+                      <th
+                        colSpan={3}
+                        className="p-3 bg-emerald-100/90 dark:bg-emerald-950/80 text-emerald-950 dark:text-emerald-200 border-r border-slate-200 dark:border-slate-700 font-black"
+                      >
+                        {t.drier2}
+                      </th>
+                      <th
+                        colSpan={3}
+                        className="p-3 bg-amber-100/90 dark:bg-amber-950/80 text-amber-950 dark:text-amber-200 font-black"
+                      >
+                        {t.drierTotal}
+                      </th>
+                    </tr>
+                    <tr className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 text-[10px] font-bold border-b border-slate-200 dark:border-slate-700">
+                      <th className="p-2 w-28 border-r border-slate-200 dark:border-slate-700 text-left pl-3">
+                        {t.item}
+                      </th>
+                      <th className="p-2 w-24 border-r border-slate-200 dark:border-slate-700">
+                        {t.kg}
+                      </th>
+                      <th className="p-2 w-16 border-r border-slate-200 dark:border-slate-700">
+                        {t.pct}
+                      </th>
+
+                      <th className="p-2 w-28 border-r border-slate-200 dark:border-slate-700 text-left pl-3">
+                        {t.item}
+                      </th>
+                      <th className="p-2 w-24 border-r border-slate-200 dark:border-slate-700">
+                        {t.kg}
+                      </th>
+                      <th className="p-2 w-16 border-r border-slate-200 dark:border-slate-700">
+                        {t.pct}
+                      </th>
+
+                      <th className="p-2 w-28 border-r border-slate-200 dark:border-slate-700 text-left pl-3">
+                        {t.item}
+                      </th>
+                      <th className="p-2 w-24 border-r border-slate-200 dark:border-slate-700">
+                        {t.kg}
+                      </th>
+                      <th className="p-2 w-16">{t.pct}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800 bg-white dark:bg-slate-900 font-medium">
+                    {[
+                      { label: "1ST", k: "first" },
+                      { label: "2ND", k: "second" },
+                      { label: "3RD", k: "third" },
+                      { label: "DIR / R", k: "dir" },
+                      { label: "G BULK / BIG BULK", k: "bigBulk" },
+                    ].map(({ label, k }) => {
+                      const d1Kg = calcData?.d1Items[k] || 0;
+                      const d1Pct =
+                        calcData?.d1Total > 0
+                          ? ((d1Kg / calcData.d1Total) * 100).toFixed(2)
+                          : "0.00";
+
+                      const d2Kg = calcData?.d2Items[k] || 0;
+                      const d2Pct =
+                        calcData?.d2Total > 0
+                          ? ((d2Kg / calcData.d2Total) * 100).toFixed(2)
+                          : "0.00";
+
+                      const totKg = calcData?.totalItems[k] || 0;
+                      const totPct =
+                        calcData?.grandTotalFired > 0
+                          ? (
+                            (totKg / calcData.grandTotalFired) *
+                            100
+                          ).toFixed(2)
+                          : "0.00";
+
+                      return (
+                        <tr
+                          key={k}
+                          className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors"
+                        >
+                          <td className="p-2 text-left font-bold text-slate-700 dark:text-slate-300 pl-3 border-r border-slate-200 dark:border-slate-800">
+                            {label}
+                          </td>
+                          <td className="p-1.5 border-r border-slate-200 dark:border-slate-800">
+                            {isEditing ? (
+                              <input
+                                type="number"
+                                min="0"
+                                step="any"
+                                onKeyDown={preventNegativeKeys}
+                                value={editForm.dhools?.drier1?.[k] ?? ""}
+                                onChange={(e) =>
+                                  handleNestedChange(
+                                    "dhools",
+                                    "drier1",
+                                    k,
+                                    e.target.value,
+                                  )
+                                }
+                                className={inlineInput}
+                              />
+                            ) : (
+                              <span className="font-bold">
+                                {d1Kg.toFixed(2)}
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-2 text-slate-500 dark:text-slate-400 font-semibold border-r border-slate-200 dark:border-slate-800">
+                            {d1Pct}%
+                          </td>
+
+                          <td className="p-2 text-left font-bold text-slate-700 dark:text-slate-300 pl-3 border-r border-slate-200 dark:border-slate-800">
+                            {label}
+                          </td>
+                          <td className="p-1.5 border-r border-slate-200 dark:border-slate-800">
+                            {isEditing ? (
+                              <input
+                                type="number"
+                                min="0"
+                                step="any"
+                                onKeyDown={preventNegativeKeys}
+                                value={editForm.dhools?.drier2?.[k] ?? ""}
+                                onChange={(e) =>
+                                  handleNestedChange(
+                                    "dhools",
+                                    "drier2",
+                                    k,
+                                    e.target.value,
+                                  )
+                                }
+                                className={inlineInput}
+                              />
+                            ) : (
+                              <span className="font-bold">
+                                {d2Kg.toFixed(2)}
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-2 text-slate-500 dark:text-slate-400 font-semibold border-r border-slate-200 dark:border-slate-800">
+                            {d2Pct}%
+                          </td>
+
+                          <td className="p-2 text-left font-bold text-slate-700 dark:text-slate-300 pl-3 border-r border-slate-200 dark:border-slate-800">
+                            {label}
+                          </td>
+                          <td className="p-2 font-black text-amber-700 dark:text-amber-400 border-r border-slate-200 dark:border-slate-800">
+                            {totKg.toFixed(2)}
+                          </td>
+                          <td className="p-2 font-bold text-amber-800 dark:text-amber-300">
+                            {totPct}%
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-slate-100 dark:bg-slate-800 font-black text-slate-900 dark:text-white border-t-2 border-slate-300 dark:border-slate-700">
+                      <td className="p-3 text-left pl-3 uppercase border-r border-slate-200 dark:border-slate-700">
+                        {t.totalFiredTea}
+                      </td>
+                      <td className="p-3 text-blue-700 dark:text-blue-400 text-sm border-r border-slate-200 dark:border-slate-700 bg-blue-50/40 dark:bg-blue-950/30">
+                        {calcData?.d1Total.toFixed(2)}
+                      </td>
+                      <td className="p-3 border-r border-slate-200 dark:border-slate-700">
+                        100%
+                      </td>
+
+                      <td className="p-3 text-left pl-3 uppercase border-r border-slate-200 dark:border-slate-700">
+                        {t.totalFiredTea}
+                      </td>
+                      <td className="p-3 text-emerald-700 dark:text-emerald-400 text-sm border-r border-slate-200 dark:border-slate-700 bg-emerald-50/40 dark:bg-emerald-950/30">
+                        {calcData?.d2Total.toFixed(2)}
+                      </td>
+                      <td className="p-3 border-r border-slate-200 dark:border-slate-700">
+                        100%
+                      </td>
+
+                      <td className="p-3 text-left pl-3 uppercase border-r border-slate-200 dark:border-slate-700">
+                        {t.totalFiredTea}
+                      </td>
+                      <td className="p-3 text-amber-700 dark:text-amber-400 text-sm border-r border-slate-200 dark:border-slate-700 bg-amber-50/40 dark:bg-amber-950/30">
+                        {calcData?.grandTotalFired.toFixed(2)} kg
+                      </td>
+                      <td className="p-3">100%</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+
+            {/* 2. FIREWOOD USAGE (kg) TABLE */}
+            <div>
+              <div className="w-full overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs">
+                <table className="w-full min-w-[850px] border-collapse text-center text-xs">
+                  <thead>
+                    <tr className="bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-extrabold uppercase border-b border-slate-200 dark:border-slate-700">
+                      <th
+                        colSpan={4}
+                        className="p-2.5 bg-blue-100/90 dark:bg-blue-950/80 text-blue-950 dark:text-blue-200 border-r border-slate-200 dark:border-slate-700 font-black"
+                      >
+                        <div className="flex flex-col sm:flex-row items-center justify-center gap-2">
+                          <span>{t.fwUsage1}</span>
+                          {isEditing ? (
+                            <div className="inline-flex items-center gap-1 bg-white/90 dark:bg-slate-900/90 px-2 py-0.5 rounded-lg border border-blue-300 dark:border-blue-700">
+                              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold lowercase">
+                                alloc:
+                              </span>
+                              <select
+                                value={activeAllocation.slot1Dhool}
+                                onChange={(e) =>
+                                  handleAllocationChange(
+                                    "slot1Dhool",
+                                    e.target.value,
+                                  )
+                                }
+                                className="bg-transparent font-black text-blue-800 dark:text-blue-300 text-xs outline-none cursor-pointer"
+                              >
+                                <option
+                                  value="drier1"
+                                  className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100"
+                                >
+                                  DHOOL 01
+                                </option>
+                                <option
+                                  value="drier2"
+                                  className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100"
+                                >
+                                  DHOOL 02
+                                </option>
+                              </select>
+                            </div>
+                          ) : (
+                            <span className="text-[10px] font-bold px-2 py-0.5 bg-blue-200/60 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300 rounded-md">
+                              ({slot1DhoolLabel})
+                            </span>
+                          )}
+                        </div>
+                      </th>
+                      <th
+                        colSpan={4}
+                        className="p-2.5 bg-emerald-100/90 dark:bg-emerald-950/80 text-emerald-950 dark:text-emerald-200 border-r border-slate-200 dark:border-slate-700 font-black"
+                      >
+                        <div className="flex flex-col sm:flex-row items-center justify-center gap-2">
+                          <span>{t.fwUsage2}</span>
+                          {isEditing ? (
+                            <div className="inline-flex items-center gap-1 bg-white/90 dark:bg-slate-900/90 px-2 py-0.5 rounded-lg border border-emerald-300 dark:border-emerald-700">
+                              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold lowercase">
+                                alloc:
+                              </span>
+                              <select
+                                value={activeAllocation.slot2Dhool}
+                                onChange={(e) =>
+                                  handleAllocationChange(
+                                    "slot2Dhool",
+                                    e.target.value,
+                                  )
+                                }
+                                className="bg-transparent font-black text-emerald-800 dark:text-emerald-300 text-xs outline-none cursor-pointer"
+                              >
+                                <option
+                                  value="drier2"
+                                  className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100"
+                                >
+                                  DHOOL 02
+                                </option>
+                                <option
+                                  value="drier1"
+                                  className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100"
+                                >
+                                  DHOOL 01
+                                </option>
+                              </select>
+                            </div>
+                          ) : (
+                            <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-200/60 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300 rounded-md">
+                              ({slot2DhoolLabel})
+                            </span>
+                          )}
+                        </div>
+                      </th>
+                      <th
+                        colSpan={4}
+                        className="p-2.5 bg-amber-100/90 dark:bg-amber-950/80 text-amber-950 dark:text-amber-200 font-black"
+                      >
+                        {t.fwUsageTotal}
+                      </th>
+                    </tr>
+                    <tr className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 text-[10px] font-bold border-b border-slate-200 dark:border-slate-700">
+                      <th className="p-2 border-r border-slate-200 dark:border-slate-700">
+                        {t.f}
+                      </th>
+                      <th className="p-2 border-r border-slate-200 dark:border-slate-700">
+                        {t.rf}
+                      </th>
+                      <th className="p-2 border-r border-slate-200 dark:border-slate-700">
+                        {t.w}
+                      </th>
+                      <th className="p-2 border-r border-slate-200 dark:border-slate-700 font-black">
+                        {t.extra}
+                      </th>
+
+                      <th className="p-2 border-r border-slate-200 dark:border-slate-700">
+                        {t.f}
+                      </th>
+                      <th className="p-2 border-r border-slate-200 dark:border-slate-700">
+                        {t.rf}
+                      </th>
+                      <th className="p-2 border-r border-slate-200 dark:border-slate-700">
+                        {t.w}
+                      </th>
+                      <th className="p-2 border-r border-slate-200 dark:border-slate-700 font-black">
+                        {t.extra}
+                      </th>
+
+                      <th className="p-2 border-r border-slate-200 dark:border-slate-700">
+                        {t.f}
+                      </th>
+                      <th className="p-2 border-r border-slate-200 dark:border-slate-700">
+                        {t.rf}
+                      </th>
+                      <th className="p-2 border-r border-slate-200 dark:border-slate-700">
+                        {t.w}
+                      </th>
+                      <th className="p-2 font-black">{t.total}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white dark:bg-slate-900 font-bold">
+                    <tr>
+                      <td className="p-1.5 border-r border-slate-200 dark:border-slate-800">
+                        {isEditing ? (
+                          <input
+                            type="number"
+                            min="0"
+                            onKeyDown={preventNegativeKeys}
+                            value={editForm.firewoodUsage?.drier1?.f ?? ""}
+                            onChange={(e) =>
+                              handleNestedChange(
+                                "firewoodUsage",
+                                "drier1",
+                                "f",
+                                e.target.value,
+                              )
+                            }
+                            className={inlineInput}
+                          />
+                        ) : (
+                          calcData?.u1.f
+                        )}
+                      </td>
+                      <td className="p-1.5 border-r border-slate-200 dark:border-slate-800">
+                        {isEditing ? (
+                          <input
+                            type="number"
+                            min="0"
+                            onKeyDown={preventNegativeKeys}
+                            value={editForm.firewoodUsage?.drier1?.rf ?? ""}
+                            onChange={(e) =>
+                              handleNestedChange(
+                                "firewoodUsage",
+                                "drier1",
+                                "rf",
+                                e.target.value,
+                              )
+                            }
+                            className={inlineInput}
+                          />
+                        ) : (
+                          calcData?.u1.rf
+                        )}
+                      </td>
+                      <td className="p-1.5 border-r border-slate-200 dark:border-slate-800">
+                        {isEditing ? (
+                          <input
+                            type="number"
+                            min="0"
+                            onKeyDown={preventNegativeKeys}
+                            value={editForm.firewoodUsage?.drier1?.w ?? ""}
+                            onChange={(e) =>
+                              handleNestedChange(
+                                "firewoodUsage",
+                                "drier1",
+                                "w",
+                                e.target.value,
+                              )
+                            }
+                            className={inlineInput}
+                          />
+                        ) : (
+                          calcData?.u1.w
+                        )}
+                      </td>
+                      <td className="p-3 border-r border-slate-200 dark:border-slate-800 text-blue-700 dark:text-blue-400 font-black">
+                        {calcData?.u1.total}
+                      </td>
+
+                      <td className="p-1.5 border-r border-slate-200 dark:border-slate-800">
+                        {isEditing ? (
+                          <input
+                            type="number"
+                            min="0"
+                            onKeyDown={preventNegativeKeys}
+                            value={editForm.firewoodUsage?.drier2?.f ?? ""}
+                            onChange={(e) =>
+                              handleNestedChange(
+                                "firewoodUsage",
+                                "drier2",
+                                "f",
+                                e.target.value,
+                              )
+                            }
+                            className={inlineInput}
+                          />
+                        ) : (
+                          calcData?.u2.f
+                        )}
+                      </td>
+                      <td className="p-1.5 border-r border-slate-200 dark:border-slate-800">
+                        {isEditing ? (
+                          <input
+                            type="number"
+                            min="0"
+                            onKeyDown={preventNegativeKeys}
+                            value={editForm.firewoodUsage?.drier2?.rf ?? ""}
+                            onChange={(e) =>
+                              handleNestedChange(
+                                "firewoodUsage",
+                                "drier2",
+                                "rf",
+                                e.target.value,
+                              )
+                            }
+                            className={inlineInput}
+                          />
+                        ) : (
+                          calcData?.u2.rf
+                        )}
+                      </td>
+                      <td className="p-1.5 border-r border-slate-200 dark:border-slate-800">
+                        {isEditing ? (
+                          <input
+                            type="number"
+                            min="0"
+                            onKeyDown={preventNegativeKeys}
+                            value={editForm.firewoodUsage?.drier2?.w ?? ""}
+                            onChange={(e) =>
+                              handleNestedChange(
+                                "firewoodUsage",
+                                "drier2",
+                                "w",
+                                e.target.value,
+                              )
+                            }
+                            className={inlineInput}
+                          />
+                        ) : (
+                          calcData?.u2.w
+                        )}
+                      </td>
+                      <td className="p-3 border-r border-slate-200 dark:border-slate-800 text-emerald-700 dark:text-emerald-400 font-black">
+                        {calcData?.u2.total}
+                      </td>
+
+                      <td className="p-3 border-r border-slate-200 dark:border-slate-800">
+                        {calcData?.uTotal.f}
+                      </td>
+                      <td className="p-3 border-r border-slate-200 dark:border-slate-800">
+                        {calcData?.uTotal.rf}
+                      </td>
+                      <td className="p-3 border-r border-slate-200 dark:border-slate-800">
+                        {calcData?.uTotal.w}
+                      </td>
+                      <td className="p-3 text-amber-700 dark:text-amber-400 font-black">
+                        {calcData?.uTotal.total}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* 3. FIREWOOD OUTPUT TABLE */}
+            <div>
+              <div className="w-full overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs">
+                <table className="w-full min-w-[850px] border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-extrabold uppercase border-b border-slate-200 dark:border-slate-700">
+                      <th
+                        colSpan={2}
+                        className="p-2.5 bg-blue-100/90 dark:bg-blue-950/80 text-blue-950 dark:text-blue-200 border-r border-slate-200 dark:border-slate-700 font-black"
+                      >
+                        {t.fwOut1}{" "}
+                        <span className="text-[10px] opacity-75">
+                          ({slot1DhoolLabel})
+                        </span>
+                      </th>
+                      <th
+                        colSpan={2}
+                        className="p-2.5 bg-emerald-100/90 dark:bg-emerald-950/80 text-emerald-950 dark:text-emerald-200 border-r border-slate-200 dark:border-slate-700 font-black"
+                      >
+                        {t.fwOut2}{" "}
+                        <span className="text-[10px] opacity-75">
+                          ({slot2DhoolLabel})
+                        </span>
+                      </th>
+                      <th
+                        colSpan={2}
+                        className="p-2.5 bg-amber-100/90 dark:bg-amber-950/80 text-amber-950 dark:text-amber-200 font-black"
+                      >
+                        {t.fwOutTotal}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800 bg-white dark:bg-slate-900 font-medium">
+                    {[
+                      { label: t.withoutWithering, k: "withoutWithering" },
+                      { label: t.withering, k: "withering" },
+                      { label: t.rf, k: "rf" },
+                    ].map(({ label, k }) => (
+                      <tr key={k}>
+                        <td className="p-2.5 font-bold text-slate-700 dark:text-slate-300 pl-3 border-r border-slate-200 dark:border-slate-800 w-1/6">
+                          {label}
+                        </td>
+                        <td className="p-1.5 border-r border-slate-200 dark:border-slate-800 w-1/6 text-center">
+                          {isEditing ? (
+                            <input
+                              type="number"
+                              step="any"
+                              min="0"
+                              onKeyDown={preventNegativeKeys}
+                              value={editForm.firewoodOutput?.drier1?.[k] ?? ""}
+                              onChange={(e) =>
+                                handleNestedChange(
+                                  "firewoodOutput",
+                                  "drier1",
+                                  k,
+                                  e.target.value,
+                                )
+                              }
+                              className={inlineInput}
+                            />
+                          ) : (
+                            `${calcData?.out1[k].toFixed(2)} kg`
+                          )}
+                        </td>
+                        <td className="p-2.5 font-bold text-slate-700 dark:text-slate-300 pl-3 border-r border-slate-200 dark:border-slate-800 w-1/6">
+                          {label}
+                        </td>
+                        <td className="p-1.5 border-r border-slate-200 dark:border-slate-800 w-1/6 text-center">
+                          {isEditing ? (
+                            <input
+                              type="number"
+                              step="any"
+                              min="0"
+                              onKeyDown={preventNegativeKeys}
+                              value={editForm.firewoodOutput?.drier2?.[k] ?? ""}
+                              onChange={(e) =>
+                                handleNestedChange(
+                                  "firewoodOutput",
+                                  "drier2",
+                                  k,
+                                  e.target.value,
+                                )
+                              }
+                              className={inlineInput}
+                            />
+                          ) : (
+                            `${calcData?.out2[k].toFixed(2)} kg`
+                          )}
+                        </td>
+                        <td className="p-2.5 font-bold text-slate-700 dark:text-slate-300 pl-3 border-r border-slate-200 dark:border-slate-800 w-1/6">
+                          {label}
+                        </td>
+                        <td className="p-2.5 w-1/6 text-center font-bold">
+                          {calcData?.outTotal[k].toFixed(2)} kg
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-slate-100 dark:bg-slate-800 font-black text-slate-900 dark:text-white border-t-2 border-slate-300 dark:border-slate-700">
+                      <td className="p-3 pl-3 uppercase border-r border-slate-200 dark:border-slate-700">
+                        {t.totalOutput}
+                      </td>
+                      <td className="p-3 text-blue-700 dark:text-blue-400 text-center border-r border-slate-200 dark:border-slate-700">
+                        {calcData?.out1.total.toFixed(2)} kg
+                      </td>
+                      <td className="p-3 pl-3 uppercase border-r border-slate-200 dark:border-slate-700">
+                        {t.totalOutput}
+                      </td>
+                      <td className="p-3 text-emerald-700 dark:text-emerald-400 text-center border-r border-slate-200 dark:border-slate-700">
+                        {calcData?.out2.total.toFixed(2)} kg
+                      </td>
+                      <td className="p-3 pl-3 uppercase border-r border-slate-200 dark:border-slate-700">
+                        {t.totalOutput}
+                      </td>
+                      <td className="p-3 text-amber-700 dark:text-amber-400 text-center">
+                        {calcData?.outTotal.total.toFixed(2)} kg
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+
+            {/* 4. DRIER TIME & OUTPUT TABLE */}
+            <div>
+              <div className="w-full overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs">
+                <table className="w-full min-w-[850px] border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-extrabold uppercase border-b border-slate-200 dark:border-slate-700">
+                      <th
+                        colSpan={2}
+                        className="p-2.5 bg-blue-100/90 dark:bg-blue-950/80 text-blue-950 dark:text-blue-200 border-r border-slate-200 dark:border-slate-700 font-black w-1/3"
+                      >
+                        {t.drier01Title}{" "}
+                        <span className="text-[10px] opacity-75">
+                          ({slot1DhoolLabel})
+                        </span>
+                      </th>
+                      <th
+                        colSpan={2}
+                        className="p-2.5 bg-emerald-100/90 dark:bg-emerald-950/80 text-emerald-950 dark:text-emerald-200 border-r border-slate-200 dark:border-slate-700 font-black w-1/3"
+                      >
+                        {t.drier02Title}{" "}
+                        <span className="text-[10px] opacity-75">
+                          ({slot2DhoolLabel})
+                        </span>
+                      </th>
+                      <th
+                        colSpan={2}
+                        className="p-2.5 bg-amber-100/90 dark:bg-amber-950/80 text-amber-950 dark:text-amber-200 font-black w-1/3"
+                      >
+                        {t.costTotal}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800 bg-white dark:bg-slate-900 font-medium">
+                    <tr>
+                      <td className="p-2.5 font-bold text-slate-700 dark:text-slate-300 pl-3 border-r border-slate-200 dark:border-slate-800">
+                        {t.startTime}
+                      </td>
+                      <td className="p-1.5 text-center font-bold border-r border-slate-200 dark:border-slate-800">
+                        {isEditing ? (
+                          <input
+                            type="time"
+                            value={editForm.drier1?.start || ""}
+                            onChange={(e) => {
+                              setIsDirty(true);
+                              setEditForm((prev) => ({
+                                ...prev,
+                                drier1: {
+                                  ...prev.drier1,
+                                  start: e.target.value,
+                                },
+                              }));
+                            }}
+                            className={inlineInput}
+                          />
+                        ) : (
+                          activeRecord.drier1?.start || "-"
+                        )}
+                      </td>
+                      <td className="p-2.5 font-bold text-slate-700 dark:text-slate-300 pl-3 border-r border-slate-200 dark:border-slate-800">
+                        {t.startTime}
+                      </td>
+                      <td className="p-1.5 text-center font-bold border-r border-slate-200 dark:border-slate-800">
+                        {isEditing ? (
+                          <input
+                            type="time"
+                            value={editForm.drier2?.start || ""}
+                            onChange={(e) => {
+                              setIsDirty(true);
+                              setEditForm((prev) => ({
+                                ...prev,
+                                drier2: {
+                                  ...prev.drier2,
+                                  start: e.target.value,
+                                },
+                              }));
+                            }}
+                            className={inlineInput}
+                          />
+                        ) : (
+                          activeRecord.drier2?.start || "-"
+                        )}
+                      </td>
+                      <td
+                        colSpan={2}
+                        className="p-2.5 bg-slate-50 dark:bg-slate-800/40"
+                      ></td>
+                    </tr>
+                    <tr>
+                      <td className="p-2.5 font-bold text-slate-700 dark:text-slate-300 pl-3 border-r border-slate-200 dark:border-slate-800">
+                        {t.endTime}
+                      </td>
+                      <td className="p-1.5 text-center font-bold border-r border-slate-200 dark:border-slate-800">
+                        {isEditing ? (
+                          <input
+                            type="time"
+                            value={editForm.drier1?.finish || ""}
+                            onChange={(e) => {
+                              setIsDirty(true);
+                              setEditForm((prev) => ({
+                                ...prev,
+                                drier1: {
+                                  ...prev.drier1,
+                                  finish: e.target.value,
+                                },
+                              }));
+                            }}
+                            className={inlineInput}
+                          />
+                        ) : (
+                          activeRecord.drier1?.finish || "-"
+                        )}
+                      </td>
+                      <td className="p-2.5 font-bold text-slate-700 dark:text-slate-300 pl-3 border-r border-slate-200 dark:border-slate-800">
+                        {t.endTime}
+                      </td>
+                      <td className="p-1.5 text-center font-bold border-r border-slate-200 dark:border-slate-800">
+                        {isEditing ? (
+                          <input
+                            type="time"
+                            value={editForm.drier2?.finish || ""}
+                            onChange={(e) => {
+                              setIsDirty(true);
+                              setEditForm((prev) => ({
+                                ...prev,
+                                drier2: {
+                                  ...prev.drier2,
+                                  finish: e.target.value,
+                                },
+                              }));
+                            }}
+                            className={inlineInput}
+                          />
+                        ) : (
+                          activeRecord.drier2?.finish || "-"
+                        )}
+                      </td>
+                      <td
+                        colSpan={2}
+                        className="p-2.5 bg-slate-50 dark:bg-slate-800/40"
+                      ></td>
+                    </tr>
+                    <tr>
+                      <td className="p-2.5 font-bold text-slate-700 dark:text-slate-300 pl-3 border-r border-slate-200 dark:border-slate-800">
+                        {t.totalHours}
+                      </td>
+                      <td className="p-2.5 text-center font-black border-r border-slate-200 dark:border-slate-800 text-blue-700 dark:text-blue-400">
+                        {calcData?.h1 || 0} h
+                      </td>
+                      <td className="p-2.5 font-bold text-slate-700 dark:text-slate-300 pl-3 border-r border-slate-200 dark:border-slate-800">
+                        {t.totalHours}
+                      </td>
+                      <td className="p-2.5 text-center font-black border-r border-slate-200 dark:border-slate-800 text-emerald-700 dark:text-emerald-400">
+                        {calcData?.h2 || 0} h
+                      </td>
+                      <td className="p-2.5 font-bold text-slate-700 dark:text-slate-300 pl-3 border-r border-slate-200 dark:border-slate-800">
+                        {t.totalHours}
+                      </td>
+                      <td className="p-2.5 text-center font-black text-amber-700 dark:text-amber-400">
+                        {calcData?.hTotal || 0} h
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="p-2.5 font-bold text-slate-700 dark:text-slate-300 pl-3 border-r border-slate-200 dark:border-slate-800">
+                        {t.drierOutputPerHour}
+                      </td>
+                      <td className="p-2.5 text-center font-black text-blue-700 dark:text-blue-400 border-r border-slate-200 dark:border-slate-800">
+                        {calcData?.outPerH1} kg
+                      </td>
+                      <td className="p-2.5 font-bold text-slate-700 dark:text-slate-300 pl-3 border-r border-slate-200 dark:border-slate-800">
+                        {t.drierOutputPerHour}
+                      </td>
+                      <td className="p-2.5 text-center font-black text-emerald-700 dark:text-emerald-400 border-r border-slate-200 dark:border-slate-800">
+                        {calcData?.outPerH2} kg
+                      </td>
+                      <td
+                        colSpan={2}
+                        className="p-2.5 bg-slate-50 dark:bg-slate-800/40"
+                      ></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* 5. COST OF FIREWOOD TABLE */}
+            <div>
+              <div className="w-full overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs">
+                <table className="w-full min-w-[850px] border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-extrabold uppercase border-b border-slate-200 dark:border-slate-700">
+                      <th
+                        colSpan={2}
+                        className="p-2.5 bg-blue-100/90 dark:bg-blue-950/80 text-blue-950 dark:text-blue-200 border-r border-slate-200 dark:border-slate-700 font-black w-1/3"
+                      >
+                        {t.costDrier01}{" "}
+                        <span className="text-[10px] opacity-75">
+                          ({slot1DhoolLabel})
+                        </span>
+                      </th>
+                      <th
+                        colSpan={2}
+                        className="p-2.5 bg-emerald-100/90 dark:bg-emerald-950/80 text-emerald-950 dark:text-emerald-200 border-r border-slate-200 dark:border-slate-700 font-black w-1/3"
+                      >
+                        {t.costDrier02}{" "}
+                        <span className="text-[10px] opacity-75">
+                          ({slot2DhoolLabel})
+                        </span>
+                      </th>
+                      <th
+                        colSpan={2}
+                        className="p-2.5 bg-amber-100/90 dark:bg-amber-950/80 text-amber-950 dark:text-amber-200 font-black w-1/3"
+                      >
+                        {t.costTotal}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800 bg-white dark:bg-slate-900 font-medium">
+                    <tr>
+                      <td className="p-2.5 font-bold text-slate-700 dark:text-slate-300 pl-3 border-r border-slate-200 dark:border-slate-800">
+                        {t.totalFwKg}
+                      </td>
+                      <td className="p-1.5 border-r border-slate-200 dark:border-slate-800 text-center">
+                        {isEditing ? (
+                          <input
+                            type="number"
+                            step="any"
+                            min="0"
+                            onKeyDown={preventNegativeKeys}
+                            value={
+                              editForm.firewoodCost?.drier1?.totalFwKg ?? ""
+                            }
+                            onChange={(e) =>
+                              handleNestedChange(
+                                "firewoodCost",
+                                "drier1",
+                                "totalFwKg",
+                                e.target.value,
+                              )
+                            }
+                            className={inlineInput}
+                          />
+                        ) : (
+                          `${calcData?.c1.fwKg} kg`
+                        )}
+                      </td>
+                      <td className="p-2.5 font-bold text-slate-700 dark:text-slate-300 pl-3 border-r border-slate-200 dark:border-slate-800">
+                        {t.totalFwKg}
+                      </td>
+                      <td className="p-1.5 border-r border-slate-200 dark:border-slate-800 text-center">
+                        {isEditing ? (
+                          <input
+                            type="number"
+                            step="any"
+                            min="0"
+                            onKeyDown={preventNegativeKeys}
+                            value={
+                              editForm.firewoodCost?.drier2?.totalFwKg ?? ""
+                            }
+                            onChange={(e) =>
+                              handleNestedChange(
+                                "firewoodCost",
+                                "drier2",
+                                "totalFwKg",
+                                e.target.value,
+                              )
+                            }
+                            className={inlineInput}
+                          />
+                        ) : (
+                          `${calcData?.c2.fwKg} kg`
+                        )}
+                      </td>
+                      <td className="p-2.5 font-bold text-slate-700 dark:text-slate-300 pl-3 border-r border-slate-200 dark:border-slate-800">
+                        {t.totalFwKg}
+                      </td>
+                      <td className="p-2.5 text-center font-bold text-amber-700 dark:text-amber-400">
+                        {calcData?.cTotal.fwKg.toFixed(2)} kg
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="p-2.5 font-bold text-slate-700 dark:text-slate-300 pl-3 border-r border-slate-200 dark:border-slate-800">
+                        {t.unitPrice}
+                      </td>
+                      <td className="p-1.5 border-r border-slate-200 dark:border-slate-800 text-center">
+                        {isEditing ? (
+                          <input
+                            type="number"
+                            step="any"
+                            min="0"
+                            onKeyDown={preventNegativeKeys}
+                            value={
+                              editForm.firewoodCost?.drier1?.unitPrice ?? ""
+                            }
+                            onChange={(e) =>
+                              handleNestedChange(
+                                "firewoodCost",
+                                "drier1",
+                                "unitPrice",
+                                e.target.value,
+                              )
+                            }
+                            className={inlineInput}
+                          />
+                        ) : (
+                          `Rs. ${calcData?.c1.unitPrice.toFixed(2)}`
+                        )}
+                      </td>
+                      <td className="p-2.5 font-bold text-slate-700 dark:text-slate-300 pl-3 border-r border-slate-200 dark:border-slate-800">
+                        {t.unitPrice}
+                      </td>
+                      <td className="p-1.5 border-r border-slate-200 dark:border-slate-800 text-center">
+                        {isEditing ? (
+                          <input
+                            type="number"
+                            step="any"
+                            min="0"
+                            onKeyDown={preventNegativeKeys}
+                            value={
+                              editForm.firewoodCost?.drier2?.unitPrice ?? ""
+                            }
+                            onChange={(e) =>
+                              handleNestedChange(
+                                "firewoodCost",
+                                "drier2",
+                                "unitPrice",
+                                e.target.value,
+                              )
+                            }
+                            className={inlineInput}
+                          />
+                        ) : (
+                          `Rs. ${calcData?.c2.unitPrice.toFixed(2)}`
+                        )}
+                      </td>
+                      <td className="p-2.5 font-bold text-slate-700 dark:text-slate-300 pl-3 border-r border-slate-200 dark:border-slate-800">
+                        {t.unitPrice}
+                      </td>
+                      <td className="p-2.5 text-center font-bold">
+                        Rs. {calcData?.cTotal.unitPrice.toFixed(2)}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="p-2.5 font-bold text-slate-700 dark:text-slate-300 pl-3 border-r border-slate-200 dark:border-slate-800">
+                        {t.madeTeaKg}
+                      </td>
+                      <td className="p-1.5 border-r border-slate-200 dark:border-slate-800 text-center">
+                        {isEditing ? (
+                          <input
+                            type="number"
+                            step="any"
+                            min="0"
+                            onKeyDown={preventNegativeKeys}
+                            value={
+                              editForm.firewoodCost?.drier1?.madeTeaKg ?? ""
+                            }
+                            onChange={(e) =>
+                              handleNestedChange(
+                                "firewoodCost",
+                                "drier1",
+                                "madeTeaKg",
+                                e.target.value,
+                              )
+                            }
+                            className={inlineInput}
+                          />
+                        ) : (
+                          `${calcData?.c1.madeTeaKg} kg`
+                        )}
+                      </td>
+                      <td className="p-2.5 font-bold text-slate-700 dark:text-slate-300 pl-3 border-r border-slate-200 dark:border-slate-800">
+                        {t.madeTeaKg}
+                      </td>
+                      <td className="p-1.5 border-r border-slate-200 dark:border-slate-800 text-center">
+                        {isEditing ? (
+                          <input
+                            type="number"
+                            step="any"
+                            min="0"
+                            onKeyDown={preventNegativeKeys}
+                            value={
+                              editForm.firewoodCost?.drier2?.madeTeaKg ?? ""
+                            }
+                            onChange={(e) =>
+                              handleNestedChange(
+                                "firewoodCost",
+                                "drier2",
+                                "madeTeaKg",
+                                e.target.value,
+                              )
+                            }
+                            className={inlineInput}
+                          />
+                        ) : (
+                          `${calcData?.c2.madeTeaKg} kg`
+                        )}
+                      </td>
+                      <td className="p-2.5 font-bold text-slate-700 dark:text-slate-300 pl-3 border-r border-slate-200 dark:border-slate-800">
+                        {t.madeTeaKg}
+                      </td>
+                      <td className="p-2.5 text-center font-bold">
+                        {calcData?.cTotal.madeTeaKg.toFixed(2)} kg
+                      </td>
+                    </tr>
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-slate-100 dark:bg-slate-800 font-black text-slate-900 dark:text-white border-t-2 border-slate-300 dark:border-slate-700">
+                      <td className="p-3 pl-3 uppercase border-r border-slate-200 dark:border-slate-700">
+                        {t.costOfFw}
+                      </td>
+                      <td className="p-3 text-blue-700 dark:text-blue-400 text-center border-r border-slate-200 dark:border-slate-700">
+                        Rs. {calcData?.c1.cost.toFixed(2)}
+                      </td>
+                      <td className="p-3 pl-3 uppercase border-r border-slate-200 dark:border-slate-700">
+                        {t.costOfFw}
+                      </td>
+                      <td className="p-3 text-emerald-700 dark:text-emerald-400 text-center border-r border-slate-200 dark:border-slate-700">
+                        Rs. {calcData?.c2.cost.toFixed(2)}
+                      </td>
+                      <td className="p-3 pl-3 uppercase border-r border-slate-200 dark:border-slate-700">
+                        {t.costOfFw}
+                      </td>
+                      <td className="p-3 text-amber-700 dark:text-amber-400 text-center">
+                        Rs. {calcData?.cTotal.cost.toFixed(2)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+
+            {/* 6. SIGN-OFFS & SPECIFICATION FOOTER */}
+            <div className="flex flex-col gap-6 pt-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                  <div className="flex-1 mr-3">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                      {t.officerName} :
+                    </span>
+                    {isEditing ? (
+                      <input
+                        type="text"
+                        value={editForm.officerName || ""}
+                        onChange={(e) => {
+                          setIsDirty(true);
+                          setEditForm((prev) => ({
+                            ...prev,
+                            officerName: e.target.value,
+                          }));
+                        }}
+                        className="w-full mt-1 bg-white dark:bg-slate-800 border border-orange-300 dark:border-orange-700 rounded-md p-1.5 text-xs font-bold text-slate-900 dark:text-white outline-none"
+                      />
+                    ) : (
+                      <p className="text-sm font-black text-slate-900 dark:text-white mt-0.5">
+                        {activeRecord.officerName ||
+                          ".................................................."}
+                      </p>
+                    )}
+                  </div>
+                  <UserCheck className="w-5 h-5 text-slate-400 shrink-0" />
+                </div>
+
+                <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                  <div className="flex-1 mr-3">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                      {t.checkBy} :
+                    </span>
+                    {isEditing ? (
+                      <input
+                        type="text"
+                        value={editForm.checkedBy || ""}
+                        onChange={(e) => {
+                          setIsDirty(true);
+                          setEditForm((prev) => ({
+                            ...prev,
+                            checkedBy: e.target.value,
+                          }));
+                        }}
+                        className="w-full mt-1 bg-white dark:bg-slate-800 border border-orange-300 dark:border-orange-700 rounded-md p-1.5 text-xs font-bold text-slate-900 dark:text-white outline-none"
+                      />
+                    ) : (
+                      <p className="text-sm font-black text-slate-900 dark:text-white mt-0.5">
+                        {activeRecord.checkedBy ||
+                          ".................................................."}
+                      </p>
+                    )}
+                  </div>
+                  <CheckCircle2 className="w-5 h-5 text-slate-400 shrink-0" />
+                </div>
+              </div>
+
+              {/* Benchmark Reference Card */}
+              <div className="p-5 bg-gradient-to-r from-slate-50 via-slate-100/50 to-slate-50 dark:from-slate-900/60 dark:via-slate-800/30 dark:to-slate-900/60 rounded-2xl border border-slate-300 dark:border-slate-700 text-xs shadow-2xs">
+                <div className="flex items-center gap-2 mb-3 text-slate-700 dark:text-slate-300 font-bold uppercase text-[11px] tracking-wider">
+                  <Flame className="w-4 h-4 text-orange-600 dark:text-orange-400" />
+                  {t.benchmarkTitle}
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 font-semibold text-slate-700 dark:text-slate-300">
+                  <div className="flex justify-between items-center bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-slate-500 dark:text-slate-400">
+                      Firewood output (1kg F/T) ➔
+                    </span>
+                    <span className="font-bold text-slate-900 dark:text-white">
+                      WITHOUT WITHERING 1KG (MAX)
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-slate-500 dark:text-slate-400">
+                      Firewood output (1kg F/T) ➔
+                    </span>
+                    <span className="font-bold text-slate-900 dark:text-white">
+                      WITH WITHERING 1.2KG (MAX)
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-slate-500 dark:text-slate-400">
+                      Drier Output (1 Yard) ➔
+                    </span>
+                    <span className="font-bold text-emerald-700 dark:text-emerald-400">
+                      WITHOUT WITHERING 200 (MIN)
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-slate-500 dark:text-slate-400">
+                      Drier Output (1 Yard) ➔
+                    </span>
+                    <span className="font-bold text-emerald-700 dark:text-emerald-400">
+                      WITH WITHERING 180 (MIN)
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default FiringSectionSummary;

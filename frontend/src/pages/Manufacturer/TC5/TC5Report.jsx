@@ -1,0 +1,1593 @@
+import React, { useState, useEffect } from "react";
+import toast from "react-hot-toast";
+import { Calendar, RefreshCw, FileText, Download, Save } from "lucide-react";
+import jsPDF from "jspdf";
+import html2canvas from "html2canvas";
+
+// --- CUSTOM DECIMAL INPUT COMPONENT ---
+// This forces 1 decimal place on blur to ensure whole numbers show as e.g. "607.0",
+// while preserving normal typing flow so the cursor doesn't jump.
+const DecimalInput = ({ value, onChange, className, placeholder }) => {
+    const [localVal, setLocalVal] = useState(Number(value) > 0 ? Number(value).toFixed(1) : "");
+
+    useEffect(() => {
+        if (Number(value) !== Number(localVal)) {
+            setLocalVal(Number(value) > 0 ? Number(value).toFixed(1) : "");
+        }
+    }, [value, localVal]);
+
+    const handleChange = (e) => {
+        setLocalVal(e.target.value);
+        onChange(e.target.value);
+    };
+
+    const handleBlur = () => {
+        const num = Number(localVal);
+        if (!isNaN(num) && num > 0) {
+            const fmt = num.toFixed(1);
+            setLocalVal(fmt);
+            onChange(fmt);
+        } else if (localVal !== "") {
+            setLocalVal("");
+            onChange("");
+        }
+    };
+
+    return (
+        <input
+            type="text"
+            inputMode="decimal"
+            className={className}
+            value={localVal}
+            onChange={handleChange}
+            onBlur={handleBlur}
+            placeholder={placeholder}
+        />
+    );
+};
+
+const generateKey = (catId, catTitle, size) => {
+    let cleanId = (catId || '').toLowerCase().trim();
+    let cleanTitle = (catTitle || '').toLowerCase().trim();
+    let cleanSize = (size || '').trim();
+
+    if (!cleanId && cleanTitle) {
+        cleanId = cleanTitle.replace(/\s+/g, '-');
+    }
+
+    let finalId = cleanId || 'unknown';
+    let finalSize = cleanSize || catTitle || '-';
+
+    if (cleanId === 'g/t' || cleanTitle === 'g/t' || cleanId === 'gt') finalId = 'gt';
+    else if (cleanId === 'other grades' || cleanTitle === 'other grades' || cleanId === 'others') finalId = 'others';
+    else if (cleanId === 'bopf sp' || cleanId === 'bopf sp.' || cleanId === 'bopfsp') finalId = 'bopfSp';
+    else if (cleanId === 'bopf premium' || cleanId === 'bopfpremium') finalId = 'bopfPremium';
+    else if (cleanId === 't/b' || cleanId === 'tb') finalId = 'tb';
+    else if (cleanId === 'pitigala tea' || cleanId === 'pitigala') finalId = 'pitigala';
+    else if (cleanId === 'athukorala') finalId = 'athukorala';
+    else {
+        finalId = cleanTitle.replace(/[^a-z0-9]/g, '');
+    }
+
+    if (finalSize.toLowerCase() === 'bopf (kg)' || finalSize.toLowerCase() === 'kg' || finalSize.toLowerCase() === 'bopf') finalSize = 'BOPF';
+    if (finalSize.toLowerCase() === 'dust (kg)' || finalSize.toLowerCase() === 'dust') finalSize = 'DUST';
+    if (finalSize.toLowerCase() === 'dust 1 (kg)' || finalSize.toLowerCase() === 'dust 1') finalSize = 'DUST 1';
+
+    return { id: finalId, title: catTitle || cleanId.toUpperCase(), size: finalSize };
+};
+
+const routeOptions = [
+    { key: "c1", display: "C1" }, { key: "c2", display: "C2" }, { key: "c3", display: "C3" },
+    { key: "c4", display: "C4" }, { key: "c5", display: "C5" }, { key: "c7", display: "C7" },
+    { key: "c8", display: "C8" }, { key: "fa", display: "Direct" },
+];
+
+const PREDEFINED_GRADES = [
+    'FBOP', 'FBOP1', 'FBOPF', 'FBOPF1', 'OP', 'OPA', 'OP1', 'PEKOE',
+    'PEKOE1', 'BOP1', 'BOPSP', 'BOPA', 'BM', 'FNGS', 'BOPF', 'BOPIA', 'DUST1'
+];
+
+const normalizeTeaType = (type) => {
+    if (!type) return "";
+    return type.toUpperCase().replace(/\s+/g, "");
+};
+
+const initialSec8 = Array.from({ length: 19 }, () => ({
+    grade: '', auction: 0, private: 0, forward: 0, exFactory: 0, direct: 0, gifts: 0, other: 0, total: 0
+}));
+
+export default function TC5Report() {
+    const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
+
+    const getCurrentMonth = () => {
+        const d = new Date();
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    };
+
+    const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
+    const [loading, setLoading] = useState(true);
+    const [generatingPdf, setGeneratingPdf] = useState(false);
+    const [savingDb, setSavingDb] = useState(false);
+    const [isDirty, setIsDirty] = useState(false);
+
+    const [refuseTea, setRefuseTea] = useState({ bf: "", manufactured: "", sold: "", manure: "", other: "" });
+
+    const [reportData, setReportData] = useState({
+        sec2: { bf: 0, ownLeaf: 0, boughtLeaf: 0, otherEstate: 0, otherFactory: 0, total: 0, disposals: 0, closing: 0 },
+        sec3: { best: 0, below: 0, poor: 0 },
+        sec8: initialSec8
+    });
+
+    useEffect(() => {
+        const handleBeforeUnload = (e) => {
+            if (isDirty) {
+                e.preventDefault();
+                e.returnValue = "You have unsaved data. Are you sure you want to leave?";
+            }
+        };
+        window.addEventListener("beforeunload", handleBeforeUnload);
+        return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+    }, [isDirty]);
+
+    useEffect(() => {
+        fetchTC5Data();
+    }, [selectedMonth]);
+
+    const fetchTC5Data = async () => {
+        setLoading(true);
+        let hasNewData = false;
+        try {
+            const token = localStorage.getItem("token");
+            const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+
+            const [logsRes, loftRes, pdfRes, tc5SavedRes, summaryRes] = await Promise.all([
+                fetch(`${BACKEND_URL}/api/factory-logs?month=${selectedMonth}`, { headers }),
+                fetch(`${BACKEND_URL}/api/factory-loft-leaf/report?month=${selectedMonth}`, { headers }),
+                fetch(`${BACKEND_URL}/api/pdf-totals/get?month=${selectedMonth}`, { headers }),
+                fetch(`${BACKEND_URL}/api/tc5report?month=${selectedMonth}`, { headers }),
+                fetch(`${BACKEND_URL}/api/summary?month=${selectedMonth}`, { headers })
+            ]);
+
+            const logsData = logsRes.ok ? await logsRes.json() : { records: [] };
+            const loftData = loftRes.ok ? await loftRes.json() : { data: [] };
+            const pdfData = pdfRes.ok ? await pdfRes.json() : { data: [] };
+            const savedReport = tc5SavedRes.ok ? await tc5SavedRes.json() : null;
+            const summaryData = summaryRes.ok ? await summaryRes.json() : null;
+
+            if (savedReport && savedReport.section5_refuseTea) {
+                setRefuseTea({
+                    bf: savedReport.section5_refuseTea.bf !== undefined ? savedReport.section5_refuseTea.bf : "",
+                    manufactured: savedReport.section5_refuseTea.manufactured !== undefined ? savedReport.section5_refuseTea.manufactured : "",
+                    sold: savedReport.section5_refuseTea.sold !== undefined ? savedReport.section5_refuseTea.sold : "",
+                    manure: savedReport.section5_refuseTea.manure !== undefined ? savedReport.section5_refuseTea.manure : "",
+                    other: savedReport.section5_refuseTea.other !== undefined ? savedReport.section5_refuseTea.other : ""
+                });
+            } else {
+                setRefuseTea({ bf: "", manufactured: "", sold: "", manure: "", other: "" });
+            }
+
+            const records = logsData.records || [];
+
+            let bf = logsData.bfFromLastMonth || 0;
+            let ownLeaf = 0, boughtLeaf = 0, totalDispatch = 0, totalLocalSale = 0;
+
+            const dispMap = {};
+            PREDEFINED_GRADES.forEach(g => {
+                dispMap[g] = { auction: 0, private: 0, forward: 0, exFactory: 0, direct: 0, gifts: 0, other: 0, total: 0 };
+            });
+
+            records.forEach(r => {
+                ownLeaf += (r.greenLeaf?.estateLeaf?.today || r.greenLeaf?.estate || 0);
+                boughtLeaf += (r.greenLeaf?.broughtLeaf?.today || r.greenLeaf?.brought || 0);
+                totalDispatch += (r.dispatch || 0);
+                totalLocalSale += (r.localSaleAndGratis || 0);
+
+                (r.dispatches || []).forEach(d => {
+                    let grade = normalizeTeaType(d.teaType);
+
+                    if (grade === 'ALL') {
+                        dispMap['BOPF'].gifts += (Number(d.weight) || 0);
+                        return;
+                    }
+
+                    if (!dispMap[grade]) {
+                        dispMap[grade] = { auction: 0, private: 0, forward: 0, exFactory: 0, direct: 0, gifts: 0, other: 0, total: 0 };
+                    }
+                    dispMap[grade].auction += (Number(d.weight) || 0);
+                });
+
+                (r.localSales || []).forEach(l => {
+                    dispMap['BOPF'].gifts += (Number(l.weight) || 0);
+                });
+            });
+
+            let calculatedBlackTeaSoldKg = 0;
+            const summaries = summaryData?.data || summaryData || [];
+
+            if (Array.isArray(summaries)) {
+                summaries.forEach(day => {
+                    const recordDate = day.date || '';
+                    if (recordDate.startsWith(selectedMonth) && Array.isArray(day.items)) {
+                        day.items.forEach(item => {
+                            const outVal = Number(item.out) || 0;
+                            if (outVal <= 0) return;
+
+                            const { id, title, size } = generateKey(item.categoryId, item.categoryTitle, item.size);
+                            const nameLower = (id === 'others' ? size : `${title} ${size}`).toLowerCase();
+                            const idLower = id.toLowerCase();
+
+                            if (idLower.startsWith('gt') || nameLower.includes('green tea') || nameLower.includes('g/t')) return;
+
+                            let multiplier = 0;
+                            if (idLower.startsWith('others') || nameLower === 'dust' || nameLower === 'dust 1' || nameLower === 'bopf') {
+                                multiplier = 1;
+                            } else if (nameLower.includes('400g') || nameLower.includes('100 bag') || nameLower.includes('t/b 100') || nameLower.endsWith(' 100')) {
+                                multiplier = 0.4;
+                            } else if (nameLower.includes('200g')) {
+                                multiplier = 0.2;
+                            } else if (nameLower.includes('100g') || nameLower.includes('25 bag') || nameLower.includes('t/b 25') || nameLower.endsWith(' 25') || nameLower.includes('welfare')) {
+                                multiplier = 0.1;
+                            } else if (nameLower.includes('50g')) {
+                                multiplier = 0.05;
+                            }
+
+                            calculatedBlackTeaSoldKg += (outVal * multiplier);
+                        });
+                    }
+                });
+            }
+
+            calculatedBlackTeaSoldKg = Number(calculatedBlackTeaSoldKg.toFixed(1));
+            dispMap['BOPF'].gifts += calculatedBlackTeaSoldKg;
+
+            let activeSec8 = Object.keys(dispMap).map(grade => {
+                const row = dispMap[grade];
+                row.total = row.auction + row.private + row.forward + row.exFactory + row.direct + row.gifts + row.other;
+
+                let displayGrade = grade;
+                if (grade === 'FFEXSP1') displayGrade = 'FF EX SP 1';
+                if (grade === 'BOPSP') displayGrade = 'BOP SP';
+
+                return { grade: displayGrade, ...row };
+            }).filter(row => row.total > 0 || row.grade === 'BOPF');
+
+            if (savedReport && savedReport.section8_disposals && savedReport.section8_disposals.length > 0) {
+                const savedRows = savedReport.section8_disposals.filter(r => r.grade && r.grade.trim() !== '');
+
+                activeSec8.forEach(apiRow => {
+                    let cleanApi = apiRow.grade.toUpperCase().replace(/\s+/g, "");
+                    let savedRow = savedRows.find(r => r.grade.toUpperCase().replace(/\s+/g, "") === cleanApi);
+
+                    if (savedRow) {
+                        if (apiRow.auction > savedRow.auction || apiRow.gifts > savedRow.gifts) {
+                            hasNewData = true;
+                        }
+
+                        apiRow.auction = Math.max(apiRow.auction, savedRow.auction || 0);
+                        apiRow.private = savedRow.private || 0;
+                        apiRow.forward = savedRow.forward || 0;
+                        apiRow.exFactory = savedRow.exFactory || 0;
+                        apiRow.direct = savedRow.direct || 0;
+                        apiRow.gifts = Math.max(apiRow.gifts, savedRow.gifts || 0);
+                        apiRow.other = savedRow.other || 0;
+                        apiRow.total = apiRow.auction + apiRow.private + apiRow.forward + apiRow.exFactory + apiRow.direct + apiRow.gifts + apiRow.other;
+                    } else {
+                        hasNewData = true;
+                    }
+                });
+
+                savedRows.forEach(savedRow => {
+                    let cleanSaved = savedRow.grade.toUpperCase().replace(/\s+/g, "");
+                    let exists = activeSec8.find(r => r.grade.toUpperCase().replace(/\s+/g, "") === cleanSaved);
+
+                    if (!exists) {
+                        let displayGrade = savedRow.grade;
+                        if (cleanSaved === 'FFEXSP1') displayGrade = 'FF EX SP 1';
+                        if (cleanSaved === 'BOPSP') displayGrade = 'BOP SP';
+
+                        activeSec8.push({
+                            ...savedRow,
+                            grade: displayGrade,
+                            total: (Number(savedRow.auction) || 0) + (Number(savedRow.private) || 0) + (Number(savedRow.forward) || 0) + (Number(savedRow.exFactory) || 0) + (Number(savedRow.direct) || 0) + (Number(savedRow.gifts) || 0) + (Number(savedRow.other) || 0)
+                        });
+                    }
+                });
+            } else {
+                if (activeSec8.length > 0) hasNewData = true;
+            }
+
+            let bopfRow = activeSec8.find(r => r.grade === 'BOPF');
+            if (!bopfRow) {
+                bopfRow = { grade: 'BOPF', auction: 0, private: 0, forward: 0, exFactory: 0, direct: 0, gifts: 0, other: 0, total: 0 };
+                activeSec8.push(bopfRow);
+            }
+            if (bopfRow.direct === calculatedBlackTeaSoldKg) bopfRow.direct = 0;
+            bopfRow.gifts = Math.max(bopfRow.gifts, calculatedBlackTeaSoldKg);
+            bopfRow.total = (Number(bopfRow.auction) || 0) + (Number(bopfRow.private) || 0) + (Number(bopfRow.forward) || 0) + (Number(bopfRow.exFactory) || 0) + (Number(bopfRow.direct) || 0) + (Number(bopfRow.gifts) || 0) + (Number(bopfRow.other) || 0);
+
+            while (activeSec8.length < 19) {
+                activeSec8.push({ grade: '', auction: 0, private: 0, forward: 0, exFactory: 0, direct: 0, gifts: 0, other: 0, total: 0 });
+            }
+            activeSec8 = activeSec8.slice(0, 19);
+
+            const currentSec8Total = activeSec8.reduce((sum, r) => sum + (Number(r.total) || 0), 0);
+            const sec2 = { bf, ownLeaf, boughtLeaf, otherEstate: 0, otherFactory: 0, disposals: currentSec8Total };
+            sec2.total = sec2.bf + sec2.ownLeaf + sec2.boughtLeaf + sec2.otherEstate + sec2.otherFactory;
+            sec2.closing = sec2.total - sec2.disposals;
+
+            if (savedReport && savedReport.section2_manufacture) {
+                sec2.bf = savedReport.section2_manufacture.bf ?? sec2.bf;
+                sec2.ownLeaf = savedReport.section2_manufacture.ownLeaf ?? sec2.ownLeaf;
+                sec2.boughtLeaf = savedReport.section2_manufacture.boughtLeaf ?? sec2.boughtLeaf;
+                sec2.otherEstate = savedReport.section2_manufacture.otherEstate ?? sec2.otherEstate;
+                sec2.otherFactory = savedReport.section2_manufacture.otherFactory ?? sec2.otherFactory;
+                sec2.disposals = currentSec8Total;
+                sec2.total = sec2.bf + sec2.ownLeaf + sec2.boughtLeaf + sec2.otherEstate + sec2.otherFactory;
+                sec2.closing = sec2.total - sec2.disposals;
+            }
+
+            const [yearS, monthS] = selectedMonth.split("-");
+            const daysInM = new Date(yearS, monthS, 0).getDate();
+            const routeMap = {};
+            routeOptions.forEach(r => routeMap[r.key] = { totalKg: 0, bKg: 0, bbKg: 0, pKg: 0 });
+
+            const pMap = {};
+            (pdfData.data || []).forEach(item => {
+                if (!pMap[item.routeKey]) pMap[item.routeKey] = {};
+                pMap[item.routeKey][item.day] = item.totalKg;
+            });
+
+            const loftRecords = loftData.data || [];
+
+            for (let day = 1; day <= daysInM; day++) {
+                const dateStr = `${selectedMonth}-${String(day).padStart(2, "0")}`;
+                routeOptions.forEach(r => {
+                    const matchedRecord = loftRecords.find(rec => {
+                        const recRouteKey = (rec.route || "").split(" - ")[0].toLowerCase();
+                        return rec.date === dateStr && recRouteKey === r.key && rec.factorySample?.isEntered;
+                    });
+
+                    let dailyTotal = 0;
+                    if (pMap[r.key] && pMap[r.key][day] !== undefined) dailyTotal = pMap[r.key][day];
+                    else if (matchedRecord) dailyTotal = (Number(matchedRecord.totalLeafQtyKg) || 0) * 0.97;
+
+                    if (dailyTotal > 0 && matchedRecord) {
+                        const bPct = Number(matchedRecord.factorySample.bestPct) || 0;
+                        const bbPct = Number(matchedRecord.factorySample.belowBestPct) || 0;
+                        const pPct = Number(matchedRecord.factorySample.poorPct) || 0;
+
+                        routeMap[r.key].totalKg += dailyTotal;
+                        routeMap[r.key].bKg += dailyTotal * (bPct / 100);
+                        routeMap[r.key].bbKg += dailyTotal * (bbPct / 100);
+                        routeMap[r.key].pKg += dailyTotal * (pPct / 100);
+                    }
+                });
+            }
+
+            let grandTotal = 0, grandB = 0, grandBB = 0, grandP = 0;
+            routeOptions.forEach(r => {
+                grandTotal += routeMap[r.key].totalKg;
+                grandB += routeMap[r.key].bKg;
+                grandBB += routeMap[r.key].bbKg;
+                grandP += routeMap[r.key].pKg;
+            });
+
+            const sec3 = {
+                best: grandTotal > 0 ? Math.round((grandB / grandTotal) * 100) : 0,
+                below: grandTotal > 0 ? Math.round((grandBB / grandTotal) * 100) : 0,
+                poor: grandTotal > 0 ? Math.round((grandP / grandTotal) * 100) : 0,
+            };
+
+            if (savedReport && savedReport.section3_averageLeaf) {
+                sec3.best = savedReport.section3_averageLeaf.best ?? sec3.best;
+                sec3.below = savedReport.section3_averageLeaf.below ?? sec3.below;
+                sec3.poor = savedReport.section3_averageLeaf.poor ?? sec3.poor;
+            }
+
+            setReportData({ sec2, sec3, sec8: activeSec8 });
+
+            if (hasNewData) {
+                setIsDirty(true);
+                toast('New production data loaded! Please Save to DB.', { icon: '⚠️', duration: 4000 });
+            } else {
+                setIsDirty(false);
+            }
+
+        } catch (error) {
+            console.error("TC5 Fetch Error:", error);
+            toast.error("Failed to load TC5 Report data.");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleRefuseChange = (e) => {
+        setIsDirty(true);
+        setRefuseTea({ ...refuseTea, [e.target.name]: e.target.value });
+    };
+
+    const handleSec2Change = (field, val) => {
+        setIsDirty(true);
+        const num = Number(val) || 0;
+        const updatedSec2 = { ...reportData.sec2, [field]: num };
+        updatedSec2.total = updatedSec2.bf + updatedSec2.ownLeaf + updatedSec2.boughtLeaf + updatedSec2.otherEstate + updatedSec2.otherFactory;
+        updatedSec2.closing = updatedSec2.total - updatedSec2.disposals;
+        setReportData({ ...reportData, sec2: updatedSec2 });
+    };
+
+    const handleSec3Change = (field, val) => {
+        setIsDirty(true);
+        const num = Number(val) || 0;
+        setReportData({
+            ...reportData,
+            sec3: { ...reportData.sec3, [field]: num }
+        });
+    };
+
+    const handleSec8Change = (index, field, val) => {
+        setIsDirty(true);
+        const updatedSec8 = [...reportData.sec8];
+        if (field === 'grade') {
+            let cleanVal = val.toUpperCase().replace(/\s+/g, "");
+            if (cleanVal === 'FFEXSP1') {
+                updatedSec8[index][field] = 'FF EX SP 1';
+            } else if (cleanVal === 'BOPSP') {
+                updatedSec8[index][field] = 'BOP SP';
+            } else {
+                updatedSec8[index][field] = val;
+            }
+        } else {
+            const num = Number(val) || 0;
+            updatedSec8[index][field] = num;
+            updatedSec8[index].total = (Number(updatedSec8[index].auction) || 0) + (Number(updatedSec8[index].private) || 0) + (Number(updatedSec8[index].forward) || 0) + (Number(updatedSec8[index].exFactory) || 0) + (Number(updatedSec8[index].direct) || 0) + (Number(updatedSec8[index].gifts) || 0) + (Number(updatedSec8[index].other) || 0);
+        }
+
+        const newSec8Total = updatedSec8.reduce((sum, r) => sum + (Number(r.total) || 0), 0);
+        const updatedSec2 = { ...reportData.sec2 };
+        updatedSec2.disposals = newSec8Total;
+        updatedSec2.closing = updatedSec2.total - updatedSec2.disposals;
+
+        setReportData({ ...reportData, sec8: updatedSec8, sec2: updatedSec2 });
+    };
+
+    const refBalance = (Number(refuseTea.bf) || 0) + (Number(refuseTea.manufactured) || 0) - ((Number(refuseTea.sold) || 0) + (Number(refuseTea.manure) || 0) + (Number(refuseTea.other) || 0));
+
+    const saveToDB = async () => {
+        setSavingDb(true);
+        const toastId = toast.loading("Saving Report to Database...");
+        try {
+            const token = localStorage.getItem("token");
+
+            const payload = {
+                month: selectedMonth,
+                section2_manufacture: reportData.sec2,
+                section3_averageLeaf: reportData.sec3,
+                section5_refuseTea: refuseTea,
+                section8_disposals: reportData.sec8,
+                refuseBalance: refBalance
+            };
+
+            const response = await fetch(`${BACKEND_URL}/api/tc5report`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                throw new Error("Failed to save report to database");
+            }
+
+            toast.success("Report Saved Successfully!", { id: toastId });
+            setIsDirty(false);
+            return true;
+        } catch (err) {
+            console.error("Save Error: ", err);
+            toast.error("Error saving to database.", { id: toastId });
+            return false;
+        } finally {
+            setSavingDb(false);
+        }
+    };
+
+    const generatePDF = async () => {
+        setGeneratingPdf(true);
+        const saveSuccess = await saveToDB();
+        if (!saveSuccess) {
+            setGeneratingPdf(false);
+            return;
+        }
+
+        const toastId = toast.loading("Generating PDF...");
+
+        window.scrollTo(0, 0);
+        await new Promise((resolve) => setTimeout(resolve, 250));
+
+        try {
+            const page1 = document.getElementById("tc5-page-1");
+            const page2 = document.getElementById("tc5-page-2");
+
+            const shiftTextUpInDoc = (clonedDoc) => {
+                ["tc5-page-1", "tc5-page-2"].forEach((id) => {
+                    const el = clonedDoc.getElementById(id);
+                    if (!el) return;
+                    const walker = clonedDoc.createTreeWalker(el, NodeFilter.SHOW_TEXT, null, false);
+                    const nodes = [];
+                    while (walker.nextNode()) {
+                        if (walker.currentNode.nodeValue && walker.currentNode.nodeValue.trim()) {
+                            nodes.push(walker.currentNode);
+                        }
+                    }
+                    nodes.forEach((node) => {
+                        const p = node.parentElement;
+                        if (p && p.tagName !== "STYLE" && p.tagName !== "SCRIPT" && !p.classList.contains("pdf-shifted")) {
+                            const s = clonedDoc.createElement("span");
+                            s.className = "pdf-shifted";
+                            s.style.position = "relative";
+                            s.style.top = "-2pt";
+                            s.style.display = "inline";
+                            node.parentNode.insertBefore(s, node);
+                            s.appendChild(node);
+                        }
+                    });
+                });
+            };
+
+            const canvas1 = await html2canvas(page1, {
+                scale: 2,
+                useCORS: true,
+                backgroundColor: "#ffffff",
+                logging: false,
+                scrollX: 0,
+                scrollY: 0,
+                onclone: (clonedDoc) => shiftTextUpInDoc(clonedDoc),
+            });
+
+            const canvas2 = await html2canvas(page2, {
+                scale: 2,
+                useCORS: true,
+                backgroundColor: "#ffffff",
+                logging: false,
+                scrollX: 0,
+                scrollY: 0,
+                onclone: (clonedDoc) => shiftTextUpInDoc(clonedDoc),
+            });
+
+            const pdf = new jsPDF("p", "mm", "a4");
+
+            const img1 = canvas1.toDataURL("image/png");
+            pdf.addImage(img1, "PNG", 0, 0, 210, 297, undefined, "FAST");
+
+            pdf.addPage();
+            const img2 = canvas2.toDataURL("image/png");
+            pdf.addImage(img2, "PNG", 0, 0, 210, 297, undefined, "FAST");
+
+            pdf.save(`TC5_Report_${selectedMonth}.pdf`);
+            toast.success("PDF Downloaded Successfully!", { id: toastId });
+        } catch (err) {
+            console.error("PDF screenshot failed:", err);
+            toast.error("Failed to generate PDF.", { id: toastId });
+        } finally {
+            setGeneratingPdf(false);
+        }
+    };
+
+    const reportMonthText = new Date(`${selectedMonth}-01`).toLocaleString('en-US', { month: 'long' }).toUpperCase();
+    const reportYearText = selectedMonth.substring(2, 4);
+
+    const sec8Totals = reportData.sec8.reduce((acc, row) => {
+        acc.auction += Number(row.auction) || 0;
+        acc.private += Number(row.private) || 0;
+        acc.forward += Number(row.forward) || 0;
+        acc.exFactory += Number(row.exFactory) || 0;
+        acc.direct += Number(row.direct) || 0;
+        acc.gifts += Number(row.gifts) || 0;
+        acc.other += Number(row.other) || 0;
+        acc.total += Number(row.total) || 0;
+        return acc;
+    }, { auction: 0, private: 0, forward: 0, exFactory: 0, direct: 0, gifts: 0, other: 0, total: 0 });
+
+    let lastDataRowIndex = -1;
+    reportData.sec8.forEach((row, idx) => {
+        if (row.grade && row.grade.trim() !== '') {
+            lastDataRowIndex = idx;
+        }
+    });
+    if (lastDataRowIndex === -1) lastDataRowIndex = 0;
+
+    return (
+        <div className="w-full min-h-screen bg-slate-100 p-3 md:p-6 font-sans overflow-x-auto">
+
+            {/* --- HEADER --- */}
+            <div className="w-full max-w-[1200px] mx-auto mb-5 md:mb-8 flex flex-col gap-4 sm:gap-5 bg-white dark:bg-zinc-900 p-4 sm:p-5 rounded-2xl shadow-sm border border-gray-200 dark:border-zinc-800 transition-colors">
+
+                {/* 💡 Title Part (Top) */}
+                <div className="w-full text-center sm:text-left border-b border-gray-100 dark:border-zinc-800 pb-3 sm:pb-4">
+                    <h2 className="text-xl sm:text-2xl font-black text-slate-800 dark:text-gray-100 flex items-center justify-center sm:justify-start gap-2 uppercase tracking-tight">
+                        <FileText className="text-emerald-600 dark:text-emerald-500" size={24} /> T.C.5 Monthly Return Document Generator
+                    </h2>
+                    <p className="text-xs sm:text-sm text-slate-500 dark:text-gray-400 font-medium mt-1">
+                        Review official production metrics, customize input data, persist changes to database, and download verified PDFs.
+                    </p>
+                </div>
+
+                {/* 💡 Controls Part (Below Title) */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-3 w-full">
+
+                    {/* MONTH PICKER */}
+                    <div className="relative flex-1 sm:flex-none w-full sm:w-auto sm:mr-auto">
+                        <Calendar size={18} className="absolute left-3 top-3 text-slate-500 dark:text-gray-400" />
+                        <input
+                            type="month"
+                            value={selectedMonth}
+                            onChange={(e) => setSelectedMonth(e.target.value)}
+                            className="w-full pl-10 pr-4 py-2.5 border border-slate-300 dark:border-zinc-700 rounded-lg text-sm font-bold focus:ring-2 focus:ring-emerald-500/50 outline-none bg-slate-50 dark:bg-zinc-800 text-slate-700 dark:text-gray-200 cursor-pointer transition-all shadow-inner"
+                        />
+                    </div>
+
+                    {/* ACTION BUTTONS */}
+                    <div className="flex flex-wrap sm:flex-nowrap gap-2 sm:gap-3 w-full sm:w-auto">
+
+                        <button
+                            onClick={saveToDB}
+                            disabled={loading || savingDb || generatingPdf}
+                            className="p-2.5 px-3 sm:px-4 flex-1 sm:flex-none justify-center bg-blue-600 hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-500 text-white rounded-lg transition-colors font-bold text-sm disabled:opacity-50 flex items-center gap-2 shadow-sm relative"
+                        >
+                            <Save size={18} />
+                            <span className="font-bold text-xs sm:text-sm hidden sm:inline">{savingDb ? "Saving..." : "Save to DB"}</span>
+                            {isDirty && (
+                                <span className="absolute -top-1.5 -right-1.5 flex h-3 w-3">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                                    <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                                </span>
+                            )}
+                        </button>
+
+                        <button
+                            onClick={generatePDF}
+                            disabled={loading || savingDb || generatingPdf}
+                            className="p-2.5 px-3 sm:px-4 flex-1 sm:flex-none justify-center bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white rounded-lg transition-colors font-bold text-sm disabled:opacity-50 flex items-center gap-2 shadow-sm"
+                        >
+                            <Download size={18} />
+                            <span className="font-bold text-xs sm:text-sm hidden sm:inline">{generatingPdf ? "Processing..." : "Download PDF"}</span>
+                        </button>
+
+                        <button
+                            onClick={fetchTC5Data}
+                            disabled={loading || savingDb || generatingPdf}
+                            className={`p-2.5 flex-1 sm:flex-none flex justify-center bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-600 dark:text-gray-300 rounded-lg transition-colors shadow-sm ${(loading || savingDb || generatingPdf) ? "opacity-70 cursor-not-allowed" : ""}`}
+                            title="Refresh Data"
+                        >
+                            <RefreshCw size={18} className={loading ? "animate-spin text-emerald-600" : ""} />
+                        </button>
+
+                    </div>
+                </div>
+            </div>
+
+            {loading ? (
+                <div className="py-32 flex flex-col items-center justify-center">
+                    <div className="w-10 h-10 border-4 border-emerald-200 border-t-emerald-600 rounded-full animate-spin mb-4"></div>
+                    <p className="text-slate-500 font-bold">Compiling T.C.5 Document...</p>
+                </div>
+            ) : (
+                <div className="w-full flex flex-col gap-10 pb-12 items-center tc5-container" style={{ zoom: 1 }}>
+
+                    <style>{`
+            .tc5-paper * { box-sizing: border-box !important; }
+            .tc5-paper { 
+              background-color: #ffffff !important; 
+              color: #000000 !important; 
+              font-family: "Times New Roman", "Iskoola Pota", "Abhaya Libre", sans-serif !important;
+              font-size: 14px; 
+              line-height: 1.2; 
+              width: 794px !important; 
+              min-width: 794px !important; 
+              max-width: 794px !important; 
+              height: 1123px !important; 
+              padding: 20px 24px !important; 
+              box-sizing: border-box !important; 
+              position: relative; 
+              overflow: hidden; 
+            }
+            
+            table.tc5-table { 
+              width: 100% !important; 
+              table-layout: fixed !important; 
+              border-collapse: separate !important; 
+              border-spacing: 0 !important; 
+              border-top: 1px solid #000000 !important; 
+              border-left: 1px solid #000000 !important; 
+              margin-top: 0 !important; 
+            }
+            table.tc5-table.no-top { border-top: none !important; }
+            
+            td.tc5-td { 
+              border-right: 1px solid #000000 !important; 
+              border-bottom: 1px solid #000000 !important; 
+              border-top: none !important; 
+              border-left: none !important; 
+              padding: 2px 3px !important; 
+              vertical-align: top; 
+              font-weight: normal; 
+            }
+            td.tc5-td-c { 
+              border-right: 1px solid #000000 !important; 
+              border-bottom: 1px solid #000000 !important; 
+              border-top: none !important; 
+              border-left: none !important; 
+              padding: 2px 3px !important; 
+              vertical-align: middle; 
+              text-align: center; 
+            }
+            th.tc5-th { 
+              border-right: 1px solid #000000 !important; 
+              border-bottom: 1px solid #000000 !important; 
+              border-top: none !important; 
+              border-left: none !important; 
+              padding: 2px 3px !important; 
+              vertical-align: top; 
+              font-weight: normal; 
+            }
+
+            td.tc5-td-right { 
+                border-right: 1px solid #000000 !important; 
+                border-bottom: 1px solid #000000 !important; 
+                border-top: none !important; 
+                border-left: none !important; 
+                padding: 3px 16px 3px 3px !important; 
+                vertical-align: middle; 
+                text-align: right; 
+            }
+            .tc5-input-right { 
+                width: 100%; 
+                text-align: right; 
+                border: none; 
+                outline: none; 
+                background: transparent; 
+                font-weight: bold; 
+                font-family: inherit; 
+                font-size: 14px; 
+                color: #000000; 
+                padding: 1px 0; 
+            }
+            
+            .tc5-input { 
+              width: 100%; 
+              text-align: center; 
+              border: none; 
+              outline: none; 
+              background: transparent; 
+              font-weight: bold; 
+              font-family: inherit; 
+              font-size: 14px; 
+              color: #000000; 
+              padding: 1px 0; 
+            }
+            
+            .border-left-fix { border-left: 1px solid #000000 !important; }
+
+            #tc5-page-1 table.tc5-table td.tc5-td, 
+            #tc5-page-1 table.tc5-table td.tc5-td-c, 
+            #tc5-page-1 table.tc5-table th.tc5-th {
+              padding: 3px 5px !important; 
+            }
+            #tc5-page-1 .tc5-input {
+              font-size: 15px !important; 
+            }
+          `}</style>
+
+                    {/* ============================== PAGE 1 ============================== */}
+                    <div className="bg-white shadow-2xl border border-gray-300 overflow-hidden" style={{ width: '794px', height: '1123px' }}>
+                        <div id="tc5-page-1" className="tc5-paper h-full flex flex-col relative">
+                            {/* TABLE 1: TOP HEADER */}
+                            <table className="tc5-table">
+                                <tbody>
+                                    <tr>
+                                        <td className="tc5-td" style={{ padding: '4px 8px' }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', fontWeight: 'bold', fontSize: '15px' }}>
+                                                <div>
+                                                    <span>MONTHLY TEA PRODUCTION RETURN FOR THE MONTH OF </span>
+                                                    <span style={{ borderBottom: '1px dotted #000', display: 'inline-block', minWidth: '90px', textAlign: 'center', fontWeight: 'bold', padding: '0 4px' }}>
+                                                        {reportMonthText}
+                                                    </span>
+                                                    <span> 20</span>
+                                                    <span style={{ borderBottom: '1px dotted #000', display: 'inline-block', minWidth: '35px', textAlign: 'center', fontWeight: 'bold', padding: '0 4px' }}>
+                                                        {reportYearText}
+                                                    </span>
+                                                </div>
+                                                <div style={{ fontSize: '15px', fontWeight: 'bold' }}>T.C.5/2008-1</div>
+                                            </div>
+
+                                            <div style={{ textAlign: 'center', fontWeight: 'bold', fontSize: '14px', margin: '4px 0' }}>
+                                                UNDER THE TEA CONTROL ACT NO 51 OF 1957
+                                            </div>
+
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', fontSize: '15px' }}>
+                                                <div style={{ flex: 1, display: 'flex', alignItems: 'baseline' }}>
+                                                    <span style={{ fontWeight: 'bold' }}>20</span>
+                                                    <span style={{ borderBottom: '1px dotted #000', display: 'inline-block', width: '30px', textAlign: 'center', fontWeight: 'bold', padding: '0 2px' }}>
+
+                                                    </span>
+                                                    <span style={{ borderBottom: '1px dotted #000', display: 'inline-block', flex: 1, maxWidth: '240px', textAlign: 'center', fontWeight: 'bold', padding: '0 8px' }}>
+
+                                                    </span>
+                                                    <span style={{ marginLeft: '6px' }}>මස තේ නිෂ්පාදනය පිළිබඳ මාසික වාර්තාව</span>
+                                                </div>
+                                                <div style={{ fontSize: '14px', textAlign: 'right', minWidth: '80px' }}>
+                                                    ටීසී 5/2008-1
+                                                </div>
+                                            </div>
+
+                                            <div style={{ textAlign: 'center', fontSize: '14px', marginTop: '1px' }}>
+                                                1957 අංක 51 දරණ තේ පාලන පනත
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+
+                            {/* TABLE 2: SECTION 1 & SECTION 2 */}
+                            <table className="tc5-table no-top">
+                                <tbody>
+                                    <tr>
+                                        <td className="tc5-td-c" style={{ width: '3%', fontWeight: 'bold', fontSize: '14px' }}>1</td>
+                                        <td className="tc5-td" style={{ width: '37%' }}>
+                                            <div style={{ display: 'flex', gap: '6px' }}>
+                                                <span style={{ fontWeight: 'bold', fontSize: '14px' }}>1.1</span>
+                                                <div>
+                                                    <span style={{ fontSize: '14px' }}>Name of Factory :</span><br />
+                                                    <span style={{ fontSize: '14px' }}>කම්හලේ නම</span>
+                                                    <strong style={{ display: 'block', marginTop: '1px', fontSize: '14px' }}>ATHUKORALA TEA FACTORY</strong>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td className="tc5-td" style={{ width: '35%' }}>
+                                            <div style={{ display: 'flex', gap: '6px' }}>
+                                                <span style={{ fontWeight: 'bold', fontSize: '14px' }}>1.2</span>
+                                                <div>
+                                                    <span style={{ fontSize: '14px' }}>Registered No</span><br />
+                                                    <span style={{ fontSize: '14px' }}>ලියාපදිංචි අංකය</span>
+                                                    <strong style={{ display: 'block', marginTop: '1px', letterSpacing: '1px', fontSize: '14px' }}>MF1398 </strong>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td className="tc5-td" style={{ width: '25%' }}>
+                                            <div style={{ display: 'flex', gap: '6px' }}>
+                                                <span style={{ fontWeight: 'bold', fontSize: '14px' }}>1.3</span>
+                                                <div>
+                                                    <span style={{ fontSize: '14px' }}>Elevation</span><br />
+                                                    <span style={{ fontSize: '14px' }}>පිහිටීම</span>
+                                                    <strong style={{ display: 'block', marginTop: '1px', fontSize: '14px' }}>Low Grown</strong>
+                                                </div>
+                                            </div>
+                                        </td>
+                                    </tr>
+
+                                    <tr>
+                                        <td className="tc5-td-c" style={{ fontWeight: 'bold', fontSize: '14px' }}>2</td>
+                                        <td className="tc5-td">
+                                            <span style={{ fontSize: '14px' }}>Production and stock position of orthodox made tea:</span><br />
+                                            <span style={{ fontSize: '14px' }}>පාරම්පරික සකස් කළ තේ නිෂ්පාදනය සහ තොග තත්වය</span>
+                                        </td>
+                                        <td className="tc5-td bg-shade" style={{ verticalAlign: 'middle' }}>
+                                            <span style={{ fontSize: '14px' }}>Management Type</span><br />
+                                            <span style={{ fontSize: '14px' }}>කළමනාකරණ කාණ්ඩය</span>
+                                        </td>
+                                        <td className="tc5-td" style={{ padding: 0 }}>
+                                            <table style={{ width: '100%', height: '100%', borderCollapse: 'collapse', textAlign: 'center', fontSize: '12px' }}>
+                                                <tbody>
+                                                    <tr>
+                                                        <td style={{ borderRight: '1px solid #000', padding: '2px 4px', width: '20%' }}>
+                                                            Plan<br />tation<br />
+                                                            <span style={{ fontSize: '14px', display: 'block', marginTop: '1px' }}>☐</span>
+                                                        </td>
+                                                        <td style={{ borderRight: '1px solid #000', padding: '2px 4px', width: '20%' }}>
+                                                            Private<br /><br />
+                                                            <strong style={{ fontSize: '14px' }}>[X]</strong>
+                                                        </td>
+                                                        <td style={{ borderRight: '1px solid #000', padding: '2px 4px', width: '20%' }}>
+                                                            Co-op<br /><br />
+                                                            <span style={{ fontSize: '14px', display: 'block', marginTop: '1px' }}>☐</span>
+                                                        </td>
+                                                        <td style={{ borderRight: '1px solid #000', padding: '2px 4px', width: '20%' }}>
+                                                            Tea<br />Shakthi<br />
+                                                            <span style={{ fontSize: '14px', display: 'block', marginTop: '1px' }}>☐</span>
+                                                        </td>
+                                                        <td style={{ padding: '2px 4px', width: '20%' }}>
+                                                            Other<br /><br />
+                                                            <span style={{ fontSize: '14px', display: 'block', marginTop: '1px' }}>☐</span>
+                                                        </td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+
+                            {/* TABLE 3: STOCK & MANUFACTURE */}
+                            <table className="tc5-table no-top" style={{ textAlign: 'left' }}>
+                                <thead>
+                                    <tr>
+                                        <th className="tc5-th" rowSpan="3" style={{ width: '3%', textAlign: 'center', verticalAlign: 'middle', padding: 0 }}>
+                                            <div style={{ fontWeight: 'bold', fontSize: '11px', lineHeight: '1.2', letterSpacing: '1px' }}>
+                                                OD<br />
+                                                RO<br />
+                                                TX<br />
+                                                H<br />
+                                                O
+                                            </div>
+                                        </th>
+                                        <th className="tc5-th" rowSpan="3" style={{ width: '14%' }}>
+                                            <span style={{ fontSize: '14px' }}>Stock of tea at the beginning of the month</span><br /><br />
+                                            <span style={{ fontSize: '14px' }}>මාසය ආරම්භයේ දී තේ තොගය</span>
+                                        </th>
+                                        <th className="tc5-th" colSpan="4" style={{ textAlign: 'left', padding: '2px', fontSize: '14px' }}>
+                                            Tel No / දුරකථන අංකය : 0912 291 123<strong></strong>
+                                        </th>
+                                        <th className="tc5-th" colSpan="3" style={{ textAlign: 'left', padding: '2px' }}>
+                                            <span style={{ fontSize: '14px' }}>Miscellaneous receipt of made tea</span><br />
+                                            <span style={{ fontSize: '14px' }}>වෙනත් සකස් කල තේ ලබා ගත් මාර් ග</span>
+                                        </th>
+                                    </tr>
+                                    <tr>
+                                        <th className="tc5-th bg-shade border-left-fix" colSpan="4" style={{ textAlign: 'center', padding: '2px', fontSize: '14px' }}>
+                                            <strong>Manufacture / නිෂ්පාදනය කිරීම</strong>
+                                        </th>
+                                        <th className="tc5-th" rowSpan="2" style={{ width: '11%' }}>
+                                            <span style={{ fontSize: '14px' }}>Total</span><br /><br />
+                                            <span style={{ fontSize: '12px' }}>එකතුව</span><br /><br />
+                                            <center style={{ marginTop: '8px' }}><br /><br /><br /><strong>5</strong></center>
+                                        </th>
+                                        <th className="tc5-th" rowSpan="2" style={{ width: '14%' }}>
+                                            <span style={{ fontSize: '14px' }}>Disposals during the month</span><br />
+                                            <span style={{ fontSize: '12px' }}>මාසය තුල අපහරණය කළ ප්‍රමාණය</span><br />
+                                            <center style={{ marginTop: '8px' }}><br /><strong>6</strong></center>
+                                        </th>
+                                        <th className="tc5-th" rowSpan="2" style={{ width: '14%' }}>
+                                            <span style={{ fontSize: '14px' }}>Stock of tea at the end of the month</span><br />
+                                            <span style={{ fontSize: '12px' }}>මාසය අවසානයේ ඉතිරි තේ තොගය</span><br />
+                                            <center style={{ marginTop: '8px' }}><br /><strong>7</strong></center>
+                                        </th>
+                                    </tr>
+                                    <tr>
+                                        <th className="tc5-th border-left-fix" style={{ width: '11%' }}>
+                                            <span style={{ fontSize: '13px' }}>From own leaf</span><br /><br />
+                                            <span style={{ fontSize: '14px' }}>තම වත්තේ දළු වලින්</span><br />
+                                            <center style={{ marginTop: '4px' }}><br /><br /><strong>1</strong></center>
+                                        </th>
+                                        <th className="tc5-th" style={{ width: '11%' }}>
+                                            <span style={{ fontSize: '14px' }}>From leaf of other estates</span><br />
+                                            <span style={{ fontSize: '12px' }}>වෙනත් වතුවල දළු වලින්</span><br />
+                                            <center style={{ marginTop: '4px' }}><br /><br /><strong>2</strong></center>
+                                        </th>
+                                        <th className="tc5-th" style={{ width: '11%' }}>
+                                            <span style={{ fontSize: '14px' }}>From bought leaf</span><br /><br />
+                                            <span style={{ fontSize: '12px' }}>මිලට ගත් දළු වලින්</span><br />
+                                            <center style={{ marginTop: '4px' }}><br /><strong>3</strong></center>
+                                        </th>
+                                        <th className="tc5-th" style={{ width: '14%' }}>
+                                            <span style={{ fontSize: '14px' }}>Manufactured by other factories</span><br />
+                                            <span style={{ fontSize: '12px' }}>වෙනත් කම්හල් මගින් නිපදවාගත්</span><br />
+                                            <center style={{ marginTop: '4px' }}><strong>4</strong></center>
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr className="bg-shade" style={{ fontWeight: 'bold', fontSize: '15px', textAlign: 'center' }}>
+                                        <td className="tc5-td-c" style={{ padding: '4px 2px', fontSize: '11px' }}>&nbsp;</td>
+                                        <td className="tc5-td-c" style={{ padding: '0' }}>
+                                            {generatingPdf ? <span style={{ fontWeight: 'bold', display: 'block', padding: '4px 0', fontSize: '15px' }}>{reportData.sec2.bf > 0 ? reportData.sec2.bf.toFixed(1) : '-'}</span> : <DecimalInput value={reportData.sec2.bf} onChange={(val) => handleSec2Change('bf', val)} className="tc5-input py-1" placeholder="-" />}
+                                        </td>
+                                        <td className="tc5-td-c" style={{ padding: '0' }}>
+                                            {generatingPdf ? <span style={{ fontWeight: 'bold', display: 'block', padding: '4px 0', fontSize: '15px' }}>{reportData.sec2.ownLeaf > 0 ? reportData.sec2.ownLeaf.toFixed(1) : '-'}</span> : <DecimalInput value={reportData.sec2.ownLeaf} onChange={(val) => handleSec2Change('ownLeaf', val)} className="tc5-input py-1" placeholder="-" />}
+                                        </td>
+                                        <td className="tc5-td-c" style={{ padding: '0' }}>
+                                            {generatingPdf ? <span style={{ fontWeight: 'bold', display: 'block', padding: '4px 0', fontSize: '15px' }}>{reportData.sec2.otherEstate > 0 ? reportData.sec2.otherEstate.toFixed(1) : '-'}</span> : <DecimalInput value={reportData.sec2.otherEstate} onChange={(val) => handleSec2Change('otherEstate', val)} className="tc5-input py-1" placeholder="-" />}
+                                        </td>
+                                        <td className="tc5-td-c" style={{ padding: '0' }}>
+                                            {generatingPdf ? <span style={{ fontWeight: 'bold', display: 'block', padding: '4px 0', fontSize: '15px' }}>{reportData.sec2.boughtLeaf > 0 ? reportData.sec2.boughtLeaf.toFixed(1) : '-'}</span> : <DecimalInput value={reportData.sec2.boughtLeaf} onChange={(val) => handleSec2Change('boughtLeaf', val)} className="tc5-input py-1" placeholder="-" />}
+                                        </td>
+                                        <td className="tc5-td-c" style={{ padding: '0' }}>
+                                            {generatingPdf ? <span style={{ fontWeight: 'bold', display: 'block', padding: '4px 0', fontSize: '15px' }}>{reportData.sec2.otherFactory > 0 ? reportData.sec2.otherFactory.toFixed(1) : '-'}</span> : <DecimalInput value={reportData.sec2.otherFactory} onChange={(val) => handleSec2Change('otherFactory', val)} className="tc5-input py-1" placeholder="-" />}
+                                        </td>
+                                        <td className="tc5-td-c" style={{ padding: '4px' }}>{reportData.sec2.total > 0 ? reportData.sec2.total.toFixed(1) : '-'}</td>
+                                        <td className="tc5-td-c" style={{ padding: '4px' }}>{reportData.sec2.disposals > 0 ? reportData.sec2.disposals.toFixed(1) : '-'}</td>
+                                        <td className="tc5-td-c" style={{ padding: '4px' }}>{reportData.sec2.closing > 0 ? reportData.sec2.closing.toFixed(1) : '-'}</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+
+                            {/* TABLE 4: AVERAGE GREEN LEAF */}
+                            <table className="tc5-table no-top">
+                                <tbody>
+                                    <tr>
+                                        <td className="tc5-td-c" style={{ width: '3%', fontWeight: 'bold', fontSize: '14px' }}>3</td>
+                                        <td className="tc5-td" style={{ width: '55%', verticalAlign: 'middle' }}>
+                                            <span style={{ fontSize: '15px' }}>Average Green Tea Leaf Standard</span><br />
+                                            <span style={{ fontSize: '14px' }}>සාමාන්‍ය අමු තේ දළු ප්‍රමිතිය</span>
+                                        </td>
+                                        <td className="tc5-td-c" style={{ width: '14%', padding: '2px' }}>
+                                            <span style={{ fontSize: '14px' }}>Best</span><br /><span style={{ fontSize: '14px' }}>හොඳ</span><br />
+                                            {generatingPdf ? (
+                                                <span style={{ display: 'block', fontWeight: 'bold', marginTop: '1px', fontSize: '17px' }}>{reportData.sec3.best > 0 ? `${reportData.sec3.best}%` : '-'}</span>
+                                            ) : (
+                                                <div className="flex items-center justify-center mt-1">
+                                                    <input type="number" value={reportData.sec3.best || ""} onChange={(e) => handleSec3Change('best', e.target.value)} className="tc5-input text-center py-1" style={{ width: '50px' }} placeholder="-" />
+                                                    <span className="font-bold text-base">%</span>
+                                                </div>
+                                            )}
+                                        </td>
+                                        <td className="tc5-td-c" style={{ width: '14%', padding: '2px' }}>
+                                            <span style={{ fontSize: '14px' }}>Below Best</span><br /><span style={{ fontSize: '14px' }}>සාමාන්‍‍ය</span><br />
+                                            {generatingPdf ? (
+                                                <span style={{ display: 'block', fontWeight: 'bold', marginTop: '1px', fontSize: '17px' }}>{reportData.sec3.below > 0 ? `${reportData.sec3.below}%` : '-'}</span>
+                                            ) : (
+                                                <div className="flex items-center justify-center mt-1">
+                                                    <input type="number" value={reportData.sec3.below || ""} onChange={(e) => handleSec3Change('below', e.target.value)} className="tc5-input text-center py-1" style={{ width: '50px' }} placeholder="-" />
+                                                    <span className="font-bold text-base">%</span>
+                                                </div>
+                                            )}
+                                        </td>
+                                        <td className="tc5-td-c" style={{ width: '14%', padding: '2px' }}>
+                                            <span style={{ fontSize: '14px' }}>Poor</span><br /><span style={{ fontSize: '14px' }}>දුර්වල</span><br />
+                                            {generatingPdf ? (
+                                                <span style={{ display: 'block', fontWeight: 'bold', marginTop: '1px', fontSize: '17px' }}>{reportData.sec3.poor > 0 ? `${reportData.sec3.poor}%` : '-'}</span>
+                                            ) : (
+                                                <div className="flex items-center justify-center mt-1">
+                                                    <input type="number" value={reportData.sec3.poor || ""} onChange={(e) => handleSec3Change('poor', e.target.value)} className="tc5-input text-center py-1" style={{ width: '50px' }} placeholder="-" />
+                                                    <span className="font-bold text-base">%</span>
+                                                </div>
+                                            )}
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+
+                            {/* TABLE 5: DETAILS OF PRIVATE SALES */}
+                            <table className="tc5-table no-top" style={{ textAlign: 'center' }}>
+                                <tbody>
+                                    <tr>
+                                        <td className="tc5-td-c" rowSpan="6" style={{ width: '3%', fontWeight: 'bold', fontSize: '14px', borderRight: '1px solid #000000 !important' }}>4</td>
+                                        <td className="tc5-td" colSpan="8" style={{ textAlign: 'left', fontWeight: 'bold' }}>
+                                            <span style={{ fontSize: '15px' }}>Details of Private Sales : </span><span style={{ fontSize: '14px', fontWeight: 'normal' }}>පෞද්ගලික විකිණීම් පිළිබඳ විස්තර</span>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td className="tc5-td-c bg-shade" style={{ width: '12%', lineHeight: '1.2', padding: '2px' }}>
+                                            <div style={{ fontSize: '14px', fontWeight: 'bold' }}>Garden marks</div>
+                                            <div style={{ fontSize: '14px' }}>වෙළඳ ලකුණ</div>
+                                        </td>
+                                        <td className="tc5-td-c bg-shade" style={{ width: '10%', lineHeight: '1.2', padding: '2px' }}>
+                                            <div style={{ fontSize: '14px', fontWeight: 'bold' }}>Invoice No</div>
+                                            <div style={{ fontSize: '14px' }}>ඉන්වොයිස් අංකය</div>
+                                        </td>
+                                        <td className="tc5-td-c bg-shade" style={{ width: '9%', lineHeight: '1.2', padding: '2px' }}>
+                                            <div style={{ fontSize: '14px', fontWeight: 'bold' }}>Grade</div>
+                                            <div style={{ fontSize: '14px' }}>වර්ගය</div>
+                                        </td>
+                                        <td className="tc5-td bg-shade" style={{ width: '23%', textAlign: 'center', lineHeight: '1.2', padding: '1px' }}>
+                                            <div style={{ fontSize: '14px', fontWeight: 'bold' }}>Name of buyers</div>
+                                            <div style={{ fontSize: '12px' }}>ගැණුම්කරුවන්ගේ නම</div>
+                                        </td>
+                                        <td className="tc5-td-c bg-shade" style={{ width: '10%', lineHeight: '1.2', padding: '2px' }}>
+                                            <div style={{ fontSize: '14px', fontWeight: 'bold' }}>Date of sale</div>
+                                            <div style={{ fontSize: '14px' }}>විකුණුම් දිනය</div>
+                                        </td>
+                                        <td className="tc5-td-c bg-shade" style={{ width: '11%', lineHeight: '1.1', verticalAlign: 'middle', padding: '2px' }}>
+                                            <div style={{ fontSize: '14px', fontWeight: 'bold' }}>Date of panel approved</div>
+                                            <div style={{ fontSize: '14px', marginTop: '1px' }}>මණ්ඩල අනුමත කළ දිනය    </div>
+                                        </td>
+                                        <td className="tc5-td-c bg-shade" style={{ width: '11%', padding: 0, verticalAlign: 'top' }}>
+                                            <div style={{ padding: '2px', borderBottom: '1px solid #000', fontWeight: 'bold', fontSize: '14px', lineHeight: '1.1' }}>
+                                                <div>Price per Kg</div>
+                                                <div style={{ fontSize: '14px', fontWeight: 'normal' }}>මිල කිලෝ එකකට</div>
+                                            </div>
+                                            <div style={{ display: 'flex', fontSize: '13px', fontWeight: 'bold' }}>
+                                                <div style={{ width: '50%', borderRight: '1px solid #000', padding: '2px 0', textAlign: 'center' }}>Rs. රු.</div>
+                                                <div style={{ width: '50%', padding: '2px 0', textAlign: 'center' }}>Cts ශත</div>
+                                            </div>
+                                        </td>
+                                        <td className="tc5-td-c bg-shade" style={{ width: '10%', lineHeight: '1.2', padding: '2px' }}>
+                                            <div style={{ fontSize: '14px', fontWeight: 'bold' }}>Weight Kgs</div>
+                                            <div style={{ fontSize: '14px' }}>බර</div>
+                                        </td>
+                                    </tr>
+
+                                    <tr style={{ height: '10px' }}>
+                                        <td className="tc5-td border-left-fix" style={{ padding: 0 }}></td>
+                                        <td className="tc5-td" style={{ padding: 0 }}></td>
+                                        <td className="tc5-td" style={{ padding: 0 }}></td>
+                                        <td className="tc5-td" style={{ padding: 0 }}></td>
+                                        <td className="tc5-td" style={{ padding: 0 }}></td>
+                                        <td className="tc5-td" style={{ padding: 0 }}></td>
+                                        <td className="tc5-td" style={{ padding: 0 }}>
+                                            <div style={{ display: 'flex', height: '100%', minHeight: '10px' }}>
+                                                <div style={{ width: '50%', borderRight: '1px solid #000' }}></div>
+                                                <div style={{ width: '50%' }}></div>
+                                            </div>
+                                        </td>
+                                        <td className="tc5-td" style={{ padding: 0 }}></td>
+                                    </tr>
+
+                                    <tr style={{ height: '24px' }}>
+                                        <td className="tc5-td border-left-fix" style={{ padding: 0 }}></td>
+                                        <td className="tc5-td" style={{ padding: 0 }}></td>
+                                        <td className="tc5-td" style={{ padding: 0 }}></td>
+                                        <td className="tc5-td-c" style={{ color: '#6a737f', fontWeight: 'bold', fontSize: '11px', letterSpacing: '0.3em', padding: 0 }}>
+                                            NIL
+                                        </td>
+                                        <td className="tc5-td" style={{ padding: 0 }}></td>
+                                        <td className="tc5-td" style={{ padding: 0 }}></td>
+                                        <td className="tc5-td" style={{ padding: 0 }}>
+                                            <div style={{ display: 'flex', height: '100%', minHeight: '24px' }}>
+                                                <div style={{ width: '50%', borderRight: '1px solid #000' }}></div>
+                                                <div style={{ width: '50%' }}></div>
+                                            </div>
+                                        </td>
+                                        <td className="tc5-td" style={{ padding: 0 }}></td>
+                                    </tr>
+
+                                    <tr style={{ height: '10px' }}>
+                                        <td className="tc5-td border-left-fix" style={{ padding: 0 }}></td>
+                                        <td className="tc5-td" style={{ padding: 0 }}></td>
+                                        <td className="tc5-td" style={{ padding: 0 }}></td>
+                                        <td className="tc5-td" style={{ padding: 0 }}></td>
+                                        <td className="tc5-td" style={{ padding: 0 }}></td>
+                                        <td className="tc5-td" style={{ padding: 0 }}></td>
+                                        <td className="tc5-td" style={{ padding: 0 }}>
+                                            <div style={{ display: 'flex', height: '100%', minHeight: '10px' }}>
+                                                <div style={{ width: '50%', borderRight: '1px solid #000' }}></div>
+                                                <div style={{ width: '50%' }}></div>
+                                            </div>
+                                        </td>
+                                        <td className="tc5-td" style={{ padding: 0 }}></td>
+                                    </tr>
+
+                                    <tr style={{ height: '20px' }}>
+                                        <td className="tc5-td border-left-fix" colSpan="4" style={{ padding: 0 }}></td>
+                                        <td className="tc5-td-c" colSpan="2" style={{ fontWeight: 'bold', textAlign: 'right', paddingRight: '8px', fontSize: '14px', verticalAlign: 'middle', padding: '2px' }}>Total / එකතුව</td>
+                                        <td className="tc5-td bg-shade" style={{ padding: 0 }}>
+                                            <div style={{ display: 'flex', height: '100%', minHeight: '20px' }}>
+                                                <div style={{ width: '50%', borderRight: '1px solid #000' }}></div>
+                                                <div style={{ width: '50%' }}></div>
+                                            </div>
+                                        </td>
+                                        <td className="tc5-td bg-shade" style={{ padding: 0 }}></td>
+                                    </tr>
+                                </tbody>
+                            </table>
+
+                            {/* TABLE 6: REFUSE TEA */}
+                            <table className="tc5-table no-top" style={{ textAlign: 'center' }}>
+                                <colgroup>
+                                    <col style={{ width: '3%' }} />
+                                    <col style={{ width: '24%' }} />
+                                    <col style={{ width: '16%' }} />
+                                    <col style={{ width: '14%' }} />
+                                    <col style={{ width: '15%' }} />
+                                    <col style={{ width: '15%' }} />
+                                    <col style={{ width: '14%' }} />
+                                </colgroup>
+                                <tbody>
+                                    <tr>
+                                        <td className="tc5-td-c" rowSpan="3" style={{ fontWeight: 'bold', fontSize: '14px', borderRight: '1px solid #000000 !important' }}>5</td>
+                                        <td className="tc5-td" colSpan="6" style={{ textAlign: 'left' }}>
+                                            <strong style={{ fontSize: '16px' }}>Refuse Tea : </strong> <span style={{ fontSize: '16px' }}>කසල තේ</span>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td className="tc5-td bg-shade" style={{ textAlign: 'center', padding: '2px' }}><div style={{ fontSize: '14px' }}>Stock brought<br />forward from previous month<br /><span style={{ fontSize: '14px' }}>ඉකුත් මාසයෙන් ඉදිරියට ගෙන ආ තොගය</span><br /><center><strong>1</strong></center></div></td>
+                                        <td className="tc5-td bg-shade" style={{ textAlign: 'center', padding: '2px' }}><div style={{ fontSize: '14px' }}>Manufactured<br />during the month<br /><span style={{ fontSize: '14px' }}>මාසය තුල නිපැයුම</span><br /><br /><center><strong>2</strong></center></div></td>
+                                        <td className="tc5-td bg-shade" style={{ textAlign: 'center', padding: '2px' }}><div style={{ fontSize: '14px' }}>Quantity<br />sold<br /><span style={{ fontSize: '14px' }}>විකුණු ප්‍රමාණය</span><br /><br /><center><strong>3</strong></center></div></td>
+                                        <td className="tc5-td bg-shade" style={{ textAlign: 'center', padding: '2px' }}><div style={{ fontSize: '14px' }}>Quantity used<br />as manure<br /><span style={{ fontSize: '14px' }}>පොහොර ලෙස යෙදූ ප්‍රමාණය</span><br /><center><strong>4</strong></center></div></td>
+                                        <td className="tc5-td bg-shade" style={{ textAlign: 'center', padding: '2px' }}><div style={{ fontSize: '14px' }}>Other disposals<br /><br /><span style={{ fontSize: '14px' }}>වෙනත් අපහරණයන්</span><br /><center><strong>5</strong></center></div></td>
+                                        <td className="tc5-td bg-shade" style={{ textAlign: 'center', padding: '2px' }}><div style={{ fontSize: '14px' }}>Balance stock<br /><br /><span style={{ fontSize: '14px' }}>ඉතිරි තොගය</span><br /><br /><center><strong>6</strong></center></div></td>
+                                    </tr>
+                                    <tr>
+                                        <td className="tc5-td-c border-left-fix" style={{ padding: '0' }}>
+                                            {generatingPdf ? <span style={{ fontWeight: 'bold', display: 'block', padding: '4px 0', fontSize: '15px' }}>{Number(refuseTea.bf) > 0 ? Number(refuseTea.bf).toFixed(1) : "-"}</span> : <DecimalInput value={refuseTea.bf} onChange={(val) => handleRefuseChange({ target: { name: 'bf', value: val } })} className="tc5-input py-1" placeholder="-" />}
+                                        </td>
+                                        <td className="tc5-td-c" style={{ padding: '0' }}>
+                                            {generatingPdf ? <span style={{ fontWeight: 'bold', display: 'block', padding: '4px 0', fontSize: '15px' }}>{Number(refuseTea.manufactured) > 0 ? Number(refuseTea.manufactured).toFixed(1) : "-"}</span> : <DecimalInput value={refuseTea.manufactured} onChange={(val) => handleRefuseChange({ target: { name: 'manufactured', value: val } })} className="tc5-input py-1" placeholder="-" />}
+                                        </td>
+                                        <td className="tc5-td-c" style={{ padding: '0' }}>
+                                            {generatingPdf ? <span style={{ fontWeight: 'bold', display: 'block', padding: '4px 0', fontSize: '15px' }}>{Number(refuseTea.sold) > 0 ? Number(refuseTea.sold).toFixed(1) : "-"}</span> : <DecimalInput value={refuseTea.sold} onChange={(val) => handleRefuseChange({ target: { name: 'sold', value: val } })} className="tc5-input py-1" placeholder="-" />}
+                                        </td>
+                                        <td className="tc5-td-c" style={{ padding: '0' }}>
+                                            {generatingPdf ? <span style={{ fontWeight: 'bold', display: 'block', padding: '4px 0', fontSize: '15px' }}>{Number(refuseTea.manure) > 0 ? Number(refuseTea.manure).toFixed(1) : "-"}</span> : <DecimalInput value={refuseTea.manure} onChange={(val) => handleRefuseChange({ target: { name: 'manure', value: val } })} className="tc5-input py-1" placeholder="-" />}
+                                        </td>
+                                        <td className="tc5-td-c" style={{ padding: '0' }}>
+                                            {generatingPdf ? <span style={{ fontWeight: 'bold', display: 'block', padding: '4px 0', fontSize: '15px' }}>{Number(refuseTea.other) > 0 ? Number(refuseTea.other).toFixed(1) : "-"}</span> : <DecimalInput value={refuseTea.other} onChange={(val) => handleRefuseChange({ target: { name: 'other', value: val } })} className="tc5-input py-1" placeholder="-" />}
+                                        </td>
+                                        <td className="tc5-td-c bg-shade" style={{ fontWeight: 'bold', fontSize: '15px' }}>{refBalance > 0 ? refBalance.toFixed(2) : '-'}</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+
+                            {/* TABLE 7: DETAILS & BROKERS */}
+                            <table className="tc5-table no-top" style={{ marginBottom: '8px', width: '100%' }}>
+                                <tbody>
+                                    <tr>
+                                        <td className="tc5-td-c" style={{ width: '3%', fontWeight: 'bold', fontSize: '14px' }}>6</td>
+                                        <td className="tc5-td" colSpan="2" style={{ padding: '2px 4px' }}>
+                                            <strong style={{ fontSize: '14px' }}>Details of Disposal of Refuse Tea : </strong>
+                                            <span style={{ fontSize: '14px' }}>කසල තේ අපහරණය පිළිබඳ වැඩිමනත් විස්තර</span>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td className="tc5-td-c" style={{ width: '3%', fontWeight: 'bold', fontSize: '14px' }}>7</td>
+                                        <td className="tc5-td" style={{ width: '48%', height: '85px', verticalAlign: 'top', padding: '4px' }}>
+                                            <div style={{ fontWeight: 'bold', fontSize: '14px' }}>Name of brokers</div>
+                                            <div style={{ fontSize: '14px', marginBottom: '6px' }}>තැරැව්කරුවන්ගේ නම</div>
+                                            <div style={{ fontSize: '14px' }}>
+                                                <div style={{ display: 'flex', alignItems: 'flex-end', marginBottom: '1px' }}>
+                                                    <span style={{ marginRight: '4px' }}>1.</span>
+                                                    <span style={{ borderBottom: '2px dotted #4b5563', flex: 1, paddingBottom: '0px', fontSize: '15px' }}>Lanka Commodity Brokers Ltd.</span>
+                                                </div>
+                                                <div style={{ display: 'flex', alignItems: 'flex-end', marginBottom: '1px' }}>
+                                                    <span style={{ marginRight: '4px' }}>2.</span>
+                                                    <span style={{ borderBottom: '2px dotted #4b5563', flex: 1, paddingBottom: '0px', fontSize: '15px' }}>Bartleet Produce Marketing (Pvt) Ltd.</span>
+                                                </div>
+                                                <div style={{ display: 'flex', alignItems: 'flex-end', marginBottom: '1px' }}>
+                                                    <span style={{ marginRight: '4px', color: '#4b5563' }}>3.</span>
+                                                    <span style={{ borderBottom: '2px dotted #4b5563', flex: 1, paddingBottom: '0px', fontSize: '15px' }}>&nbsp;</span>
+                                                </div>
+                                                <div style={{ display: 'flex', alignItems: 'flex-end', marginBottom: '1px' }}>
+                                                    <span style={{ marginRight: '4px', color: '#4b5563' }}>4.</span>
+                                                    <span style={{ borderBottom: '2px dotted #4b5563', flex: 1, paddingBottom: '0px', fontSize: '15px' }}>&nbsp;</span>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td className="tc5-td" style={{ width: '49%', verticalAlign: 'top', padding: '4px' }}>
+                                            <div style={{ fontWeight: 'bold', fontSize: '14px' }}>Selling marks</div>
+                                            <div style={{ fontSize: '14px', marginBottom: '6px' }}>වෙළඳ සලකුණ</div>
+                                            <div style={{ fontSize: '14px' }}>
+                                                <div style={{ display: 'flex', alignItems: 'flex-end', marginBottom: '1px' }}>
+                                                    <span style={{ marginRight: '4px' }}>1.</span>
+                                                    <span style={{ borderBottom: '2px dotted #4b5563', flex: 1, paddingBottom: '0px', fontSize: '15px' }}>Athukorala Group Super</span>
+                                                </div>
+                                                <div style={{ display: 'flex', alignItems: 'flex-end', marginBottom: '1px' }}>
+                                                    <span style={{ marginRight: '4px' }}>2.</span>
+                                                    <span style={{ borderBottom: '2px dotted #4b5563', flex: 1, paddingBottom: '0px', fontSize: '15px' }}>Athukorala Group</span>
+                                                </div>
+                                                <div style={{ display: 'flex', alignItems: 'flex-end', marginBottom: '1px' }}>
+                                                    <span style={{ marginRight: '4px' }}>3.</span>
+                                                    <span style={{ borderBottom: '2px dotted #4b5563', flex: 1, paddingBottom: '0px', fontSize: '15px' }}>Pitigala Tea</span>
+                                                </div>
+                                                <div style={{ display: 'flex', alignItems: 'flex-end', marginBottom: '1px' }}>
+                                                    <span style={{ marginRight: '4px' }}>4.</span>
+                                                    <span style={{ borderBottom: '2px dotted #4b5563', flex: 1, paddingBottom: '0px', fontSize: '15px' }}>Athukorala</span>
+                                                </div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                            {/* COLOR CODE FOOTER */}
+                            <div style={{ fontSize: '12px', marginTop: 'auto', display: 'flex', justifyContent: 'center', gap: '24px' }}>
+                                <div>
+                                    <span style={{ fontSize: '14px' }}>Color code</span><br />
+                                    <div style={{ marginLeft: '16px', lineHeight: '1.1' }}>
+                                        &#10022; White paper = Orthodox tea Manufacture<br /><span style={{ marginLeft: '16px', fontSize: '11px' }}>සුදු කඩදාසිය=පාරම්පරික තේ නිෂ්පාදනය</span><br />
+                                        &#10022; Green Paper = Green tea Manufacture<br /><span style={{ marginLeft: '16px', fontSize: '11px' }}>කොළ කඩදාසිය=හරිත තේ</span>
+                                    </div>
+                                </div>
+                                <div>
+                                    <br />
+                                    <div style={{ marginLeft: '16px', lineHeight: '1.1' }}>
+                                        &#10022; Blue paper = Orthodox + CT C or C. T. C Manufacture<br /><span style={{ marginLeft: '16px', fontSize: '11px' }}>නිල් කඩදාසිය=පාරම්පරික සහ සී ටී සී නිෂ්පාදනය හෝ සී ටී සී නිෂ්පාදනය</span><br />
+                                        &#10022; Yellow Paper = Bio tea<br /><span style={{ marginLeft: '16px', fontSize: '11px' }}>කහ කඩදාසිය=ජීව තේ</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+
+                    {/* ============================== PAGE 2 ============================== */}
+                    <div className="bg-white shadow-xl overflow-hidden mt-8 mb-24" style={{ width: '794px', height: '1123px' }}>
+                        <div id="tc5-page-2" className="tc5-paper h-full flex flex-col relative box-border">
+
+                            <div style={{ fontWeight: 'bold', fontSize: '15px', marginBottom: '2px' }}>
+                                08. Details of disposals of made tea<br />
+                                <span style={{ fontSize: '14px', fontWeight: 'normal' }}>සකස් කළ තේ අපහරණය කිරීම පිළිබඳ විස්තරය</span>
+                            </div>
+
+                            {/* TABLE 8: DISPOSALS OF MADE TEA */}
+                            <table className="tc5-table tc5-table-first" style={{ textAlign: 'center', fontSize: '13px', marginBottom: '8px' }}>
+                                <thead className="bg-shade">
+                                    <tr>
+                                        <th className="tc5-th" style={{ width: '8%', padding: '2px' }}>
+                                            <div style={{ display: 'flex', flexDirection: 'column', height: '125px' }}>
+                                                <div style={{ textAlign: 'center', fontSize: '13px', lineHeight: '1.1' }}>Invoice<br />No</div>
+                                                <div style={{ textAlign: 'center', fontSize: '12px', lineHeight: '1.1', marginTop: '1px', flex: 1 }}>ඉන්වොයිස්<br />අංකය</div>
+                                                <div style={{ textAlign: 'center', marginTop: 'auto', fontSize: '13px' }}><strong>1</strong></div>
+                                            </div>
+                                        </th>
+                                        <th className="tc5-th" style={{ width: '11%', padding: '2px' }}>
+                                            <div style={{ display: 'flex', flexDirection: 'column', height: '125px' }}>
+                                                <div style={{ textAlign: 'center', fontSize: '13px', lineHeight: '1.1' }}>Grade</div>
+                                                <div style={{ textAlign: 'center', fontSize: '12px', lineHeight: '1.1', marginTop: '1px', flex: 1 }}>තේ<br />වර්ගය</div>
+                                                <div style={{ textAlign: 'center', marginTop: 'auto', fontSize: '13px' }}><strong>2</strong></div>
+                                            </div>
+                                        </th>
+                                        <th className="tc5-th" style={{ width: '12%', padding: '2px' }}>
+                                            <div style={{ display: 'flex', flexDirection: 'column', height: '125px' }}>
+                                                <div style={{ textAlign: 'center', fontSize: '13px', lineHeight: '1.1' }}>For sale at colombo<br />auction</div>
+                                                <div style={{ textAlign: 'center', fontSize: '12px', lineHeight: '1.1', marginTop: '1px', flex: 1 }}>කොළඹ<br />වෙන්දේසියේ<br />විකිණීම සඳහා</div>
+                                                <div style={{ textAlign: 'center', marginTop: 'auto', fontSize: '13px' }}><strong>3</strong></div>
+                                            </div>
+                                        </th>
+                                        <th className="tc5-th" style={{ width: '7%', padding: '2px' }}>
+                                            <div style={{ display: 'flex', flexDirection: 'column', height: '125px' }}>
+                                                <div style={{ textAlign: 'center', fontSize: '13px', lineHeight: '1.1' }}>Private<br />sales<br />scheme</div>
+                                                <div style={{ textAlign: 'center', fontSize: '12px', lineHeight: '1.1', marginTop: '1px', flex: 1 }}>පුද්ගලික<br />විකිණීම<br />මත<br />විකිණීම<br />සඳහා</div>
+                                                <div style={{ textAlign: 'center', marginTop: 'auto', fontSize: '13px' }}><strong>4</strong></div>
+                                            </div>
+                                        </th>
+                                        <th className="tc5-th" style={{ width: '7%', padding: '2px' }}>
+                                            <div style={{ display: 'flex', flexDirection: 'column', height: '125px' }}>
+                                                <div style={{ textAlign: 'center', fontSize: '13px', lineHeight: '1.1' }}>Forward<br />contracts</div>
+                                                <div style={{ textAlign: 'center', fontSize: '12px', lineHeight: '1.1', marginTop: '1px', flex: 1 }}>මතු අදාල<br />ගිවිසුම් මත<br />විකිණීම සඳහා</div>
+                                                <div style={{ textAlign: 'center', marginTop: 'auto', fontSize: '13px' }}><strong>5</strong></div>
+                                            </div>
+                                        </th>
+                                        <th className="tc5-th" style={{ width: '7%', padding: '2px' }}>
+                                            <div style={{ display: 'flex', flexDirection: 'column', height: '125px' }}>
+                                                <div style={{ textAlign: 'center', fontSize: '13px', lineHeight: '1.1' }}>Ex<br />factory<br />sales</div>
+                                                <div style={{ textAlign: 'center', fontSize: '12px', lineHeight: '1.1', marginTop: '1px', flex: 1 }}>කර්මාන්ත<br />ශාලාවේදී<br />විකිණීම</div>
+                                                <div style={{ textAlign: 'center', marginTop: 'auto', fontSize: '13px' }}><strong>6</strong></div>
+                                            </div>
+                                        </th>
+                                        <th className="tc5-th" style={{ width: '10%', padding: '2px' }}>
+                                            <div style={{ display: 'flex', flexDirection: 'column', height: '125px' }}>
+                                                <div style={{ textAlign: 'center', fontSize: '13px', lineHeight: '1.1' }}>Exported<br />direct<br />in value<br />added form</div>
+                                                <div style={{ textAlign: 'center', fontSize: '12px', lineHeight: '1.1', marginTop: '1px', flex: 1 }}>එකතු කල<br />අගය සහිත<br />සෘජු<br />අපනයනය</div>
+                                                <div style={{ textAlign: 'center', marginTop: 'auto', fontSize: '13px' }}><strong>7</strong></div>
+                                            </div>
+                                        </th>
+                                        <th className="tc5-th" style={{ width: '10%', padding: '2px' }}>
+                                            <div style={{ display: 'flex', flexDirection: 'column', height: '125px' }}>
+                                                <div style={{ textAlign: 'center', fontSize: '13px', lineHeight: '1.1' }}>Gifts to<br />employee &<br />others</div>
+                                                <div style={{ textAlign: 'center', fontSize: '12px', lineHeight: '1.1', marginTop: '1px', flex: 1 }}>සේවකයන්ට<br />සහ වෙනත්<br />ප්‍රදානය<br />කිරීම්</div>
+                                                <div style={{ textAlign: 'center', marginTop: 'auto', fontSize: '13px' }}><strong>8</strong></div>
+                                            </div>
+                                        </th>
+                                        <th className="tc5-th" style={{ width: '15%', padding: '2px' }}>
+                                            <div style={{ display: 'flex', flexDirection: 'column', height: '125px' }}>
+                                                <div style={{ textAlign: 'center', fontSize: '13px', lineHeight: '1.1' }}>Tea<br />manufactured<br />for other estates<br />and returned</div>
+                                                <div style={{ textAlign: 'center', fontSize: '12px', lineHeight: '1.1', marginTop: '1px', flex: 1 }}>වෙනත් වතු වල<br />තේ දළු වලින්<br />නිපදවා ආපසු<br />භාරදුන් ප්‍රමාණය</div>
+                                                <div style={{ textAlign: 'center', marginTop: 'auto', fontSize: '13px' }}><strong>9</strong></div>
+                                            </div>
+                                        </th>
+                                        <th className="tc5-th" style={{ width: '7%', padding: '2px' }}>
+                                            <div style={{ display: 'flex', flexDirection: 'column', height: '125px' }}>
+                                                <div style={{ textAlign: 'center', fontSize: '13px', lineHeight: '1.1' }}>Direct<br />sales</div>
+                                                <div style={{ textAlign: 'center', fontSize: '12px', lineHeight: '1.1', marginTop: '1px', flex: 1 }}>සෘජු<br />විකිණීම්</div>
+                                                <div style={{ textAlign: 'center', marginTop: 'auto', fontSize: '13px' }}><strong>10</strong></div>
+                                            </div>
+                                        </th>
+                                        <th className="tc5-th" style={{ width: '10%', padding: '2px' }}>
+                                            <div style={{ display: 'flex', flexDirection: 'column', height: '125px' }}>
+                                                <div style={{ textAlign: 'center', fontSize: '13px', lineHeight: '1.1' }}>Total</div>
+                                                <div style={{ textAlign: 'center', fontSize: '12px', lineHeight: '1.1', marginTop: '1px', flex: 1 }}>මුළු<br />එකතුව</div>
+                                                <div style={{ textAlign: 'center', marginTop: 'auto', fontSize: '13px' }}><strong>11</strong></div>
+                                            </div>
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {reportData.sec8.map((row, idx) => (
+                                        <React.Fragment key={idx}>
+                                            <tr style={{ height: '20px' }}>
+                                                <td className="tc5-td">&nbsp;</td>
+                                                <td className="tc5-td-c" style={{ padding: 0 }}>
+                                                    {generatingPdf ? (
+                                                        <span style={{ fontSize: '14px', fontWeight: 'bold', textTransform: 'uppercase' }}>{row.grade}</span>
+                                                    ) : (
+                                                        <input type="text" value={row.grade || ""} onChange={(e) => handleSec8Change(idx, 'grade', e.target.value)} className="tc5-input" style={{ textTransform: 'uppercase' }} placeholder="" />
+                                                    )}
+                                                </td>
+                                                <td className="tc5-td-right">
+                                                    {generatingPdf ? (
+                                                        <span style={{ fontSize: '14px', fontWeight: 'bold' }}>{row.auction > 0 ? row.auction.toFixed(1) : '-'}</span>
+                                                    ) : (
+                                                        <DecimalInput value={row.auction} onChange={(val) => handleSec8Change(idx, 'auction', val)} className="tc5-input-right" placeholder="-" />
+                                                    )}
+                                                </td>
+                                                <td className="tc5-td-right">
+                                                    {generatingPdf ? (
+                                                        <span style={{ fontSize: '14px', fontWeight: 'bold' }}>{row.private > 0 ? row.private.toFixed(1) : '-'}</span>
+                                                    ) : (
+                                                        <DecimalInput value={row.private} onChange={(val) => handleSec8Change(idx, 'private', val)} className="tc5-input-right" placeholder="-" />
+                                                    )}
+                                                </td>
+                                                <td className="tc5-td-right">
+                                                    {generatingPdf ? (
+                                                        <span style={{ fontSize: '14px', fontWeight: 'bold' }}>{row.forward > 0 ? row.forward.toFixed(1) : '-'}</span>
+                                                    ) : (
+                                                        <DecimalInput value={row.forward} onChange={(val) => handleSec8Change(idx, 'forward', val)} className="tc5-input-right" placeholder="-" />
+                                                    )}
+                                                </td>
+                                                <td className="tc5-td-right">
+                                                    {generatingPdf ? (
+                                                        <span style={{ fontSize: '14px', fontWeight: 'bold' }}>{row.exFactory > 0 ? row.exFactory.toFixed(1) : '-'}</span>
+                                                    ) : (
+                                                        <DecimalInput value={row.exFactory} onChange={(val) => handleSec8Change(idx, 'exFactory', val)} className="tc5-input-right" placeholder="-" />
+                                                    )}
+                                                </td>
+                                                <td className="tc5-td-right">
+                                                    {generatingPdf ? (
+                                                        <span style={{ fontSize: '14px', fontWeight: 'bold' }}>{row.direct > 0 ? row.direct.toFixed(1) : '-'}</span>
+                                                    ) : (
+                                                        <DecimalInput value={row.direct} onChange={(val) => handleSec8Change(idx, 'direct', val)} className="tc5-input-right" placeholder="-" />
+                                                    )}
+                                                </td>
+                                                <td className="tc5-td-right">
+                                                    {generatingPdf ? (
+                                                        <span style={{ fontSize: '14px', fontWeight: 'bold' }}>{row.gifts > 0 ? row.gifts.toFixed(1) : '-'}</span>
+                                                    ) : (
+                                                        <DecimalInput value={row.gifts} onChange={(val) => handleSec8Change(idx, 'gifts', val)} className="tc5-input-right" placeholder="-" />
+                                                    )}
+                                                </td>
+                                                <td className="tc5-td-right">
+                                                    {generatingPdf ? (
+                                                        <span style={{ fontSize: '14px', fontWeight: 'bold' }}>{row.other > 0 ? row.other.toFixed(1) : '-'}</span>
+                                                    ) : (
+                                                        <DecimalInput value={row.other} onChange={(val) => handleSec8Change(idx, 'other', val)} className="tc5-input-right" placeholder="-" />
+                                                    )}
+                                                </td>
+                                                <td className="tc5-td-c">&nbsp;</td>
+                                                <td className="tc5-td-right" style={{ fontWeight: 'bold', fontSize: '14px' }}>{row.total > 0 ? row.total.toFixed(1) : '-'}</td>
+                                            </tr>
+
+                                            {/* DYNAMIC TOTAL ROW */}
+                                            {idx === lastDataRowIndex && (
+                                                <tr style={{ height: '20px' }} className="bg-shade">
+                                                    <td className="tc5-td">&nbsp;</td>
+                                                    <td className="tc5-td-c" style={{ fontWeight: 'bold', fontSize: '14px' }}>TOTAL</td>
+                                                    <td className="tc5-td-right" style={{ fontWeight: 'bold', fontSize: '14px' }}>{sec8Totals.auction > 0 ? sec8Totals.auction.toFixed(1) : '-'}</td>
+                                                    <td className="tc5-td-right" style={{ fontWeight: 'bold', fontSize: '14px' }}>{sec8Totals.private > 0 ? sec8Totals.private.toFixed(1) : '-'}</td>
+                                                    <td className="tc5-td-right" style={{ fontWeight: 'bold', fontSize: '14px' }}>{sec8Totals.forward > 0 ? sec8Totals.forward.toFixed(1) : '-'}</td>
+                                                    <td className="tc5-td-right" style={{ fontWeight: 'bold', fontSize: '14px' }}>{sec8Totals.exFactory > 0 ? sec8Totals.exFactory.toFixed(1) : '-'}</td>
+                                                    <td className="tc5-td-right" style={{ fontWeight: 'bold', fontSize: '14px' }}>{sec8Totals.direct > 0 ? sec8Totals.direct.toFixed(1) : '-'}</td>
+                                                    <td className="tc5-td-right" style={{ fontWeight: 'bold', fontSize: '14px' }}>{sec8Totals.gifts > 0 ? sec8Totals.gifts.toFixed(1) : '-'}</td>
+                                                    <td className="tc5-td-right" style={{ fontWeight: 'bold', fontSize: '14px' }}>{sec8Totals.other > 0 ? sec8Totals.other.toFixed(1) : '-'}</td>
+                                                    <td className="tc5-td-c">&nbsp;</td>
+                                                    <td className="tc5-td-right" style={{ fontWeight: 'bold', fontSize: '14px' }}>{sec8Totals.total > 0 ? sec8Totals.total.toFixed(1) : '-'}</td>
+                                                </tr>
+                                            )}
+                                        </React.Fragment>
+                                    ))}
+                                </tbody>
+                            </table>
+
+                            {/* TABLE 9: DIRECT SALES */}
+                            <div style={{ fontWeight: 'bold', fontSize: '14px', marginBottom: '4px', marginTop: '-6px' }}>
+                                09. Direct sales - Sales made without the services of a broker<br />
+                                <span style={{ fontSize: '14px', fontWeight: 'normal' }}>සෘජු විකිණීම් - තැරැව්කරුවෙකුගේ සේවාවකින් තොරව විකිණෙන ලද සකස් කළ තේ</span>
+                            </div>
+
+                            <table className="tc5-table" style={{ textAlign: 'left', fontSize: '12px', marginBottom: '0' }}>
+                                <thead>
+                                    <tr>
+                                        <th className="tc5-th" rowSpan="2" style={{ width: '13%', verticalAlign: 'top', padding: '2px' }}>
+                                            <div style={{ fontSize: '13px', lineHeight: '1.1' }}>Garden marks</div>
+                                            <div style={{ fontSize: '13px', marginTop: '1px', lineHeight: '1.1' }}>වෙළඳ ලකුණ</div>
+                                        </th>
+                                        <th className="tc5-th" rowSpan="2" style={{ width: '11%', verticalAlign: 'top', padding: '2px' }}>
+                                            <div style={{ fontSize: '13px', lineHeight: '1.1' }}>Invoice No</div>
+                                            <div style={{ fontSize: '13px', marginTop: '1px', lineHeight: '1.1' }}>ඉන්වොයිස්<br />අංකය</div>
+                                        </th>
+                                        <th className="tc5-th" rowSpan="2" style={{ width: '9%', verticalAlign: 'top', padding: '2px' }}>
+                                            <div style={{ fontSize: '13px', lineHeight: '1.1' }}>Grade</div>
+                                            <div style={{ fontSize: '13px', marginTop: '1px', lineHeight: '1.1' }}>වර්ගය</div>
+                                        </th>
+                                        <th className="tc5-th" rowSpan="2" style={{ width: '21%', verticalAlign: 'top', padding: '2px' }}>
+                                            <div style={{ fontSize: '13px', lineHeight: '1.1' }}>Name of buyers</div>
+                                            <div style={{ fontSize: '13px', marginTop: '1px', lineHeight: '1.1' }}>ගැණුම්කරුවන්ගේ<br />නම</div>
+                                        </th>
+                                        <th className="tc5-th" rowSpan="2" style={{ width: '10%', verticalAlign: 'top', padding: '2px' }}>
+                                            <div style={{ fontSize: '13px', lineHeight: '1.1' }}>Date of sale</div>
+                                            <div style={{ fontSize: '13px', marginTop: '1px', lineHeight: '1.1' }}>විකුණුම්<br />දිනය</div>
+                                        </th>
+                                        <th className="tc5-th" rowSpan="2" style={{ width: '12%', verticalAlign: 'top', padding: '2px' }}>
+                                            <div style={{ fontSize: '13px', lineHeight: '1.1' }}>Date of panel<br />approve</div>
+                                            <div style={{ fontSize: '13px', marginTop: '1px', lineHeight: '1.1' }}>මණ්ඩල අනුමත<br />කළ දිනය</div>
+                                        </th>
+                                        <th className="tc5-th" colSpan="2" style={{ width: '12%', textAlign: 'center', padding: '2px' }}>
+                                            <div style={{ fontSize: '13px', lineHeight: '1.1' }}>Price per Kg.<br />(Rs. Rs./Cts.)</div>
+                                            <div style={{ fontSize: '13px', marginTop: '1px', lineHeight: '1.1' }}>මිල කිලෝ එකකට<br />(රු./ශත)</div>
+                                        </th>
+                                        <th className="tc5-th" rowSpan="2" style={{ width: '12%', verticalAlign: 'top', padding: '2px' }}>
+                                            <div style={{ fontSize: '13px', lineHeight: '1.1' }}>Weight Kgs</div>
+                                            <div style={{ fontSize: '13px', marginTop: '1px', lineHeight: '1.1' }}>බර කිලෝ</div>
+                                        </th>
+                                    </tr>
+                                    <tr>
+                                        <th className="tc5-th" style={{ width: '6%', textAlign: 'center', padding: '2px', fontSize: '13px' }}>Rs. රු.</th>
+                                        <th className="tc5-th" style={{ width: '6%', textAlign: 'center', padding: '2px', fontSize: '13px' }}>Cts. ශත</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr><td className="tc5-td" style={{ height: '22px' }}>&nbsp;</td><td className="tc5-td">&nbsp;</td><td className="tc5-td">&nbsp;</td><td className="tc5-td">&nbsp;</td><td className="tc5-td">&nbsp;</td><td className="tc5-td">&nbsp;</td><td className="tc5-td">&nbsp;</td><td className="tc5-td">&nbsp;</td><td className="tc5-td">&nbsp;</td></tr>
+                                    <tr>
+                                        <td className="tc5-td" style={{ height: '22px' }}>&nbsp;</td>
+                                        <td className="tc5-td">&nbsp;</td>
+                                        <td className="tc5-td">&nbsp;</td>
+                                        <td className="tc5-td-c" style={{ color: '#727d8a', fontWeight: 'bold', fontSize: '18px', letterSpacing: '0.3em' }}>
+                                            NIL
+                                        </td>
+                                        <td className="tc5-td">&nbsp;</td>
+                                        <td className="tc5-td">&nbsp;</td>
+                                        <td className="tc5-td">&nbsp;</td>
+                                        <td className="tc5-td">&nbsp;</td>
+                                        <td className="tc5-td">&nbsp;</td>
+                                    </tr>
+                                    <tr><td className="tc5-td" style={{ height: '22px' }}>&nbsp;</td><td className="tc5-td">&nbsp;</td><td className="tc5-td">&nbsp;</td><td className="tc5-td">&nbsp;</td><td className="tc5-td">&nbsp;</td><td className="tc5-td">&nbsp;</td><td className="tc5-td">&nbsp;</td><td className="tc5-td">&nbsp;</td><td className="tc5-td">&nbsp;</td></tr>
+                                    <tr>
+                                        <td className="tc5-td" colSpan="6" style={{ textAlign: 'right', paddingRight: '8px', fontSize: '14px', fontWeight: 'bold' }}>Total එකතුව</td>
+                                        <td className="tc5-td" colSpan="2">&nbsp;</td>
+                                        <td className="tc5-td">&nbsp;</td>
+                                    </tr>
+
+                                    {/* DECLARATIONS BOX */}
+                                    <tr>
+                                        <td className="tc5-td" colSpan="9" style={{ padding: '6px 8px' }}>
+                                            <p style={{ margin: '0 0 4px 0', fontSize: '13px' }}>I/We hereby declare that all the particulars furnished in this return are true and accurate.<br /><span style={{ fontSize: '14px' }}>මෙම වාර්තාවේ සපයා ඇති සියලු විස්තර සත්‍ය බවත් නිවැරදි බවත් මම / අපි මෙයින් ප්‍රකාශ කර සිටිමු / සිටිමි.</span></p>
+
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: '2px', marginBottom: '0px', textAlign: 'center', fontSize: '13px' }}>
+                                                <div style={{ textAlign: 'left', width: '20%' }}>
+                                                    Date :<br /><span style={{ fontSize: '13px' }}>දිනය</span>
+                                                </div>
+                                                <div style={{ width: '50%' }}>
+                                                    <span style={{ borderBottom: '1px dotted #000', display: 'inline-block', width: '100%', marginBottom: '-6px' }}></span><br />
+                                                    Name of registered Manufacture / Superintendent<br />
+                                                    <span style={{ fontSize: '13px' }}>ලි.ප නිෂ්පාදකයාගේ / අධිකාරීගේ නම</span>
+                                                </div>
+                                                <div style={{ width: '25%' }}>
+                                                    <span style={{ borderBottom: '1px dotted #000', display: 'inline-block', width: '100%', marginBottom: '-6px' }}></span><br />
+                                                    Signature<br />
+                                                    <span style={{ fontSize: '13px' }}>අත්සන</span>
+                                                </div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td className="tc5-td" colSpan="9" style={{ padding: '6px 8px' }}>
+                                            <div style={{ fontSize: '14px' }}>
+                                                State if any special remarks<br />
+                                                <span style={{ fontSize: '14px' }}>විශේෂ විමර්ශන ඇත්නම් දක්වන්න</span>
+                                                <br />
+
+                                                <span style={{ borderBottom: '1px dotted #000', display: 'inline-block', width: '100%', marginTop: '1px' }}></span>
+                                                <br />
+                                                Date :<br />
+                                                <span style={{ fontSize: '14px' }}>දිනය</span>
+                                                <span style={{ borderBottom: '1px dotted #000', display: 'inline-block', width: '150px', marginLeft: '16px' }}></span>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td className="tc5-td" colSpan="9" style={{ padding: '6px 8px', textAlign: 'center' }}>
+                                            <p style={{ margin: 0, fontSize: '14px' }}>
+                                                This return should be addressed to the assistant tea commissioner of your region on or before the fifth of the following month.<br />
+                                                මෙම වාර්තාව ඔබ ප්‍රදේශයේ සහකාර තේ කොමසාරිස් වෙත ඊළඟ මාසයේ 05 දිනට හෝ ඊට පෙර එවිය යුතුය.
+                                            </p>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+
+                        </div>
+                    </div>
+
+                </div>
+            )}
+        </div>
+    );
+}

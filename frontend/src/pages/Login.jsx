@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { Loader2, User, LockKeyhole, CheckCircle2, Eye, EyeOff, Leaf, Package, Factory, Settings, LayoutDashboard, Store } from 'lucide-react';
+import { Loader2, User, LockKeyhole, CheckCircle2, Eye, EyeOff, Leaf, Package, Factory, Settings, LayoutDashboard, Store, ClipboardList } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // ─────────────────────────────────────────────
@@ -83,6 +83,65 @@ const THEMES = {
     badgeText: '#15803d', 
     particleColor: '#facc15', 
     particleType: 'store',
+  },
+  manufacturer: {
+    pageBg: '#f2fcf5',
+    orb1: 'rgba(132, 204, 22, 0.22)', // Lime green
+    orb2: 'rgba(34, 197, 94, 0.18)',  // Emerald green
+    orb3: 'rgba(163, 230, 53, 0.15)', // Lighter lime
+    gridStroke: '#84cc16',
+    textPrimary: '#3f6212', 
+    textSecondary: '#65a30d',
+    accent: '#84cc16',
+    btnGradient: 'linear-gradient(135deg, #4d7c0f 0%, #84cc16 100%)',
+    wipeGradient: 'linear-gradient(135deg, #3f6212 0%, #65a30d 40%, #bef264 100%)',
+    shimmer: 'rgba(132, 204, 22, 0.12)',
+    ringFocus: 'focus:ring-lime-400/25',
+    badgeBorder: '#d9f99d',
+    badgeBg: '#f7fee7',
+    badgeText: '#4d7c0f',
+    particleColor: '#84cc16',
+    particleType: 'leafCount', 
+  },
+
+ admin: {
+    pageBg: '#fefce8', // ඉතා ලා කහ පැහැති පසුබිමක්
+    orb1: 'rgba(22, 163, 74, 0.22)', // Green
+    orb2: 'rgba(234, 179, 8, 0.18)', // Yellow
+    orb3: 'rgba(132, 204, 22, 0.15)', // Lime Green
+    gridStroke: '#eab308', 
+    textPrimary: '#14532d', // තද කොළ පැහැය (පැහැදිලිව කියවීම සඳහා)
+    textSecondary: '#ca8a04', // තද කහ පැහැය
+    accent: '#16a34a', 
+    btnGradient: 'linear-gradient(135deg, #14532d 0%, #eab308 100%)', // තද කොළ සිට කහ පැහැයට යන Gradient එක
+    wipeGradient: 'linear-gradient(135deg, #064e3b 0%, #15803d 40%, #fde047 100%)',
+    shimmer: 'rgba(234, 179, 8, 0.12)',
+    ringFocus: 'focus:ring-green-500/25',
+    badgeBorder: '#fef08a',
+    badgeBg: '#f0fdf4',
+    badgeText: '#15803d',
+    particleColor: '#eab308', // කහ පැහැති floating අංශු
+    particleType: 'gear', // Admin සඳහා Gear අයිකනය එලෙසම තබා ඇත
+  },
+
+  developer: {
+    pageBg: '#f8fafc',
+    orb1: 'rgba(59, 130, 246, 0.22)',
+    orb2: 'rgba(99, 102, 241, 0.18)',
+    orb3: 'rgba(139, 92, 246, 0.15)',
+    gridStroke: '#3b82f6',
+    textPrimary: '#1e3a8a',
+    textSecondary: '#4338ca',
+    accent: '#3b82f6',
+    btnGradient: 'linear-gradient(135deg, #1e40af 0%, #3b82f6 100%)',
+    wipeGradient: 'linear-gradient(135deg, #1e3a8a 0%, #2563eb 40%, #60a5fa 100%)',
+    shimmer: 'rgba(59, 130, 246, 0.12)',
+    ringFocus: 'focus:ring-blue-500/25',
+    badgeBorder: '#bfdbfe',
+    badgeBg: '#eff6ff',
+    badgeText: '#1d4ed8',
+    particleColor: '#60a5fa',
+    particleType: 'gear',
   }
 };
 
@@ -109,6 +168,12 @@ const FloatingStore = ({ left, top, delay, color, size }) => (
   </motion.div>
 );
 
+const FloatingLeafCount = ({ left, top, delay, color, size }) => (
+  <motion.div className="absolute pointer-events-none flex items-center justify-center" style={{ left, top, color }} initial={{ opacity: 0, y: 0, scale: 0.8, rotate: -10 }} animate={{ opacity: [0, 0.4, 0.4, 0], y: [0, -70, -100], scale: [0.8, 1.1, 0.8], rotate: [-10, 10, -10] }} transition={{ duration: 7 + (delay % 4), delay, repeat: Infinity, ease: 'easeInOut' }}>
+    <ClipboardList size={size - 2} strokeWidth={2} />
+  </motion.div>
+);
+
 // ── Particle Field ──
 function ParticleField({ mode }) {
   const t = THEMES[mode];
@@ -125,6 +190,7 @@ function ParticleField({ mode }) {
       {items.map(p => {
         if (t.particleType === 'leaf') return <TeaLeaf key={p.id} {...p} color={t.particleColor} />;
         if (t.particleType === 'box') return <FloatingBox key={p.id} {...p} color={t.particleColor} />;
+        if (t.particleType === 'leafCount') return <FloatingLeafCount key={p.id} {...p} color={t.particleColor} />;
         if (t.particleType === 'store') return <FloatingStore key={p.id} {...p} color={t.particleColor} />;
         return <FloatingGear key={p.id} {...p} color={t.particleColor} />;
       })}
@@ -204,6 +270,7 @@ export default function Login() {
   const [isLoading,  setIsLoading]  = useState(false);
   const [showPass,   setShowPass]   = useState(false);
   
+  const passwordRef = useRef(null);
   const [loginStep, setLoginStep] = useState('login'); 
   const [allowedSystems, setAllowedSystems] = useState([]);
   const [activeTab,  setActiveTab]  = useState('handmade'); 
@@ -216,7 +283,10 @@ export default function Login() {
     handmade:  '/dashboard',
     packing:   '/packing',
     factory:   '/factory',
-    localSale: '/localsale' 
+    localSale: '/localsale',
+    manufacturer:  '/manufacturer', 
+    admin: '/admin/settings',
+    developer: '/developer-section'
   };
 
   const triggerThemeChange = (tab) => {
@@ -250,11 +320,18 @@ export default function Login() {
         // 1. Identify Allowed Paths dynamically based on Role
         if (userRole === 'Admin') {
             // Admins get access to all sections
-            allowed = ['handmade', 'packing', 'factory', 'localSale'];
+            allowed = ['handmade', 'packing', 'factory', 'localSale', 'manufacturer', 'admin'];
+        } else if (userRole.toLowerCase() === 'developer') {
+            // Developer has all access to all sections including Developer Section
+            allowed = ['handmade', 'packing', 'factory', 'localSale', 'manufacturer', 'admin', 'developer'];
         } else {
             // For standard users, map the IDs saved in DB to UI theme keys
             const paths = data.allowedPaths || [];
-            allowed = paths.map(path => path === 'localsale' ? 'localSale' : path);
+            allowed = paths.map(path => {
+                if (path === 'localsale') return 'localSale';
+                if (path === 'manufacturer') return 'manufacturer'; 
+                return path;
+            });
         }
 
         // Check if user has no permissions at all
@@ -269,6 +346,7 @@ export default function Login() {
         localStorage.setItem('userRole', data.role);
         localStorage.setItem('username', data.username);
         localStorage.setItem('allowedPaths', JSON.stringify(allowed)); // Important for Protected Routes
+        localStorage.setItem('allowedPages', JSON.stringify(data.allowedPages || []));
 
         // 3. Navigate appropriately
         if (allowed.length === 1) {
@@ -305,6 +383,9 @@ export default function Login() {
     if (activeTab === 'handmade') return 'H/T Factory';
     if (activeTab === 'packing') return 'Packing Section';
     if (activeTab === 'localSale') return 'Local Sale';
+    if (activeTab === 'manufacturer') return 'Manufacturer Section';
+    if (activeTab === 'admin') return 'Admin Settings';
+    if (activeTab === 'developer') return 'Developer Section';
     return 'Factory Section';
   };
 
@@ -376,6 +457,13 @@ export default function Login() {
               <Store size={14} className="opacity-80" /> Local Sale 
             </motion.div>
 
+            <motion.div
+              initial={{ opacity:0, y:10 }} animate={{ opacity:1, y:0 }} transition={{ delay: 0.5 }}
+              className="flex items-center justify-center gap-1.5 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl border font-bold text-[11px] sm:text-sm backdrop-blur-md cursor-default select-none transition-colors duration-300"
+              style={{ borderColor: THEMES.manufacturer.badgeBorder, backgroundColor: THEMES.manufacturer.badgeBg, color: THEMES.manufacturer.badgeText }}
+            >
+              <ClipboardList size={14} className="opacity-80" /> Manufacturing Section
+            </motion.div>
           </div>
         </div>
       </motion.div>
@@ -414,14 +502,33 @@ export default function Login() {
                 <div className="relative">
                   <User className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
                   <input
-                    onChange={e => setUsername(e.target.value)} type="text" value={username} placeholder="Username"
+                    onChange={e => setUsername(e.target.value)} 
+                    type="text" 
+                    value={username} 
+                    placeholder="Username"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        passwordRef.current?.focus();
+                      }
+                    }}
                     className={`w-full py-3.5 pl-12 pr-4 bg-white/80 border border-white rounded-2xl text-sm focus:outline-none focus:ring-4 transition-all duration-300 ${t.ringFocus}`}
                   />
                 </div>
                 <div className="relative">
                   <LockKeyhole className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
                   <input
-                    onChange={e => setPassword(e.target.value)} type={showPass ? 'text' : 'password'} value={password} placeholder="Password"
+                    ref={passwordRef} 
+                    onChange={e => setPassword(e.target.value)} 
+                    type={showPass ? 'text' : 'password'} 
+                    value={password} 
+                    placeholder="Password"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleLogin();
+                      }
+                    }}
                     className={`w-full py-3.5 pl-12 pr-12 bg-white/80 border border-white rounded-2xl text-sm focus:outline-none focus:ring-4 transition-all duration-300 ${t.ringFocus}`}
                   />
                   <button type="button" onClick={() => setShowPass(!showPass)} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors">
@@ -457,7 +564,7 @@ export default function Login() {
                 {allowedSystems.includes('handmade') && (
                   <button onClick={() => handleSystemSelection('handmade')} className="p-4 bg-white hover:bg-[#f0faf2] border-2 border-gray-100 hover:border-[#1B6A31] rounded-2xl flex items-center gap-4 transition-all duration-300 shadow-sm group">
                     <div className="p-3 bg-green-50 rounded-xl group-hover:bg-[#1B6A31] transition-colors"><Leaf className="text-[#1B6A31] group-hover:text-white" size={24} /></div>
-                    <span className="font-bold text-gray-800 text-lg">H/T Factory System</span>
+                    <span className="font-bold text-gray-800 text-lg">H/T Factory Section</span>
                   </button>
                 )}
                 {allowedSystems.includes('packing') && (
@@ -469,7 +576,7 @@ export default function Login() {
                 {allowedSystems.includes('factory') && (
                   <button onClick={() => handleSystemSelection('factory')} className="p-4 bg-white hover:bg-[#fefce8] border-2 border-gray-100 hover:border-[#65a30d] rounded-2xl flex items-center gap-4 transition-all duration-300 shadow-sm group">
                     <div className="p-3 bg-lime-50 rounded-xl group-hover:bg-[#65a30d] transition-colors"><Factory className="text-[#65a30d] group-hover:text-white" size={24} /></div>
-                    <span className="font-bold text-gray-800 text-lg">Factory System</span>
+                    <span className="font-bold text-gray-800 text-lg">Factory Section</span>
                   </button>
                 )}
                 
@@ -478,6 +585,34 @@ export default function Login() {
                   <button onClick={() => handleSystemSelection('localSale')} className="p-4 bg-white hover:bg-[#fefce8] border-2 border-gray-100 hover:border-[#eab308] rounded-2xl flex items-center gap-4 transition-all duration-300 shadow-sm group">
                     <div className="p-3 bg-yellow-50 rounded-xl group-hover:bg-[#15803d] transition-colors"><Store className="text-[#15803d] group-hover:text-yellow-400" size={24} /></div>
                     <span className="font-bold text-gray-800 text-lg">Local Sale</span>
+                  </button>
+                )}
+
+                {/* ── Manufacturer Option Button ── */}
+                {allowedSystems.includes('manufacturer') && (
+                  <button onClick={() => handleSystemSelection('manufacturer')} className="p-4 bg-white hover:bg-[#f2fcf5] border-2 border-gray-100 hover:border-[#84cc16] rounded-2xl flex items-center gap-4 transition-all duration-300 shadow-sm group">
+                    <div className="p-3 bg-lime-50 rounded-xl group-hover:bg-[#84cc16] transition-colors"><ClipboardList className="text-[#65a30d] group-hover:text-white" size={24} /></div>
+                    <span className="font-bold text-gray-800 text-lg">Manufacturing Section</span>
+                  </button>
+                )}
+
+                {/* ── Admin Option Button (Only Admin) ── */}
+                {allowedSystems.includes('admin') && (
+                  <button onClick={() => handleSystemSelection('admin')} className="p-4 bg-white hover:bg-gray-50 border-2 border-gray-100 hover:border-gray-500 rounded-2xl flex items-center gap-4 transition-all duration-300 shadow-sm group">
+                    <div className="p-3 bg-gray-100 rounded-xl group-hover:bg-gray-600 transition-colors">
+                      <Settings className="text-gray-600 group-hover:text-white" size={24} />
+                    </div>
+                    <span className="font-bold text-gray-800 text-lg">Admin Settings</span>
+                  </button>
+                )}
+
+                {/* ── Developer Option Button (Only Developer) ── */}
+                {allowedSystems.includes('developer') && (
+                  <button onClick={() => handleSystemSelection('developer')} className="p-4 bg-white hover:bg-blue-50 border-2 border-gray-100 hover:border-blue-500 rounded-2xl flex items-center gap-4 transition-all duration-300 shadow-sm group">
+                    <div className="p-3 bg-blue-100 rounded-xl group-hover:bg-blue-600 transition-colors">
+                      <LayoutDashboard className="text-blue-600 group-hover:text-white" size={24} />
+                    </div>
+                    <span className="font-bold text-gray-800 text-lg">Developer Section</span>
                   </button>
                 )}
               </div>

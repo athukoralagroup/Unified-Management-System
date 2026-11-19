@@ -1,37 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
-import { PlusCircle, Trash2, ListChecks, Save, X, CalendarClock, Zap, AlertCircle, Search, Sun, Moon, ChevronRight, MoreVertical, Leaf, Factory, Users, RefreshCw } from "lucide-react";
-import { MdOutlineDeleteOutline, MdOutlineEdit } from "react-icons/md";
-import PDFDownloader from '@/components/PDFDownloader';
+import { PlusCircle, Trash2, ListChecks, Save, X, CalendarClock, Zap, AlertCircle, Search, Leaf, Factory, Users } from "lucide-react";
 
-import {
-    AlertDialog,
-    AlertDialogAction,
-    AlertDialogCancel,
-    AlertDialogContent,
-    AlertDialogDescription,
-    AlertDialogFooter,
-    AlertDialogHeader,
-    AlertDialogTitle,
-    AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
-
-import {
-    DropdownMenu,
-    DropdownMenuTrigger,
-    DropdownMenuContent,
-    DropdownMenuLabel,
-    DropdownMenuSeparator,
-    DropdownMenuGroup,
-    DropdownMenuItem,
-    DropdownMenuShortcut,
-    DropdownMenuSub,
-    DropdownMenuSubTrigger,
-    DropdownMenuSubContent,
-} from "@/components/ui/dropdown-menu";
-
-export default function GreenLeafForm() {
+export default function NewEntryForm() {
     const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
     const navigation = useNavigate();
 
@@ -41,343 +13,16 @@ export default function GreenLeafForm() {
     useEffect(() => {
         const savedTheme = localStorage.getItem('theme');
         const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-        
+
         if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
             document.documentElement.classList.add('dark');
             setIsDark(true);
         }
     }, []);
 
-    const toggleTheme = () => {
-        const root = window.document.documentElement;
-        if (isDark) {
-            root.classList.remove('dark');
-            localStorage.setItem('theme', 'light');
-        } else {
-            root.classList.add('dark');
-            localStorage.setItem('theme', 'dark');
-        }
-        setIsDark(!isDark);
-    };
-
-    // --- CUSTOM ANIMATED DROPDOWN STATE ---
-    const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
-    const dropdownRef = useRef(null);
-
-    useEffect(() => {
-        function handleClickOutside(event) {
-            if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-                setIsProfileMenuOpen(false);
-            }
-        }
-        document.addEventListener("mousedown", handleClickOutside);
-        return () => document.removeEventListener("mousedown", handleClickOutside);
-    }, [dropdownRef]);
-    
-    const [records, setRecords] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [recordToDelete, setRecordToDelete] = useState(null);
-
-    const userRole = localStorage.getItem('userRole') || ''; 
-    const isViewer = userRole.toLowerCase() === 'viewer' || userRole.toLowerCase() === 'view';
-
-    const [startDate, setStartDate] = useState('');
-    const [endDate, setEndDate] = useState('');
-    const [teaType, setTeaType] = useState('All');
-    const [dryerType, setDryerType] = useState('All');
-
-    useEffect(() => {
-        fetchMergedRecords();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
-
-    const fetchMergedRecords = async () => {
-        setLoading(true); 
-        try {
-            const token = localStorage.getItem('token');
-            const authHeaders = {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            };
-
-            const [greenLeafRes, productionRes, labourRes] = await Promise.all([
-                fetch(`${BACKEND_URL}/api/green-leaf`, { headers: authHeaders }),
-                fetch(`${BACKEND_URL}/api/production`, { headers: authHeaders }),
-                fetch(`${BACKEND_URL}/api/labour`, { headers: authHeaders })
-            ]);
-
-            if (!greenLeafRes.ok || !productionRes.ok || !labourRes.ok) {
-                throw new Error("Failed to fetch data. Check your login token.");
-            }
-
-            const greenLeafData = await greenLeafRes.json();
-            const productionData = await productionRes.json();
-            const labourData = await labourRes.json();
-
-            const glUsage = {};
-            const labUsage = {};
-
-            const mergedData = productionData.map(prod => {
-                const dateStr = new Date(prod.date).toISOString().split('T')[0];
-                
-                const glsForDate = greenLeafData.filter(g => new Date(g.date).toISOString().split('T')[0] === dateStr);
-                const labsForDate = labourData.filter(l => new Date(l.date).toISOString().split('T')[0] === dateStr);
-
-                if (glUsage[dateStr] === undefined) glUsage[dateStr] = 0;
-                if (labUsage[dateStr] === undefined) labUsage[dateStr] = 0;
-
-                const gl = glsForDate[glUsage[dateStr]] || null;
-                const lab = labsForDate[labUsage[dateStr]] || null;
-
-                glUsage[dateStr]++;
-                labUsage[dateStr]++;
-
-                const getSafeTime = (item, field) => item && item[field] ? new Date(item[field]).getTime() : 0;
-                const glCreated = getSafeTime(gl, 'createdAt');
-                const glUpdated = getSafeTime(gl, 'updatedAt');
-                const labCreated = getSafeTime(lab, 'createdAt');
-                const labUpdated = getSafeTime(lab, 'updatedAt');
-                const prodCreated = getSafeTime(prod, 'createdAt');
-                const prodUpdated = getSafeTime(prod, 'updatedAt');
-
-                const isGlEdited = glUpdated > 0 && glCreated > 0 && (glUpdated - glCreated > 5000);
-                const isLabEdited = labUpdated > 0 && labCreated > 0 && (labUpdated - labCreated > 5000);
-                const isProdEdited = prodUpdated > 0 && prodCreated > 0 && (prodUpdated - prodCreated > 5000);
-                
-                const isEdited = isGlEdited || isLabEdited || isProdEdited;
-
-                let lastUpdatedDate = '';
-                let editedBy = '';
-
-                if (isEdited) {
-                    const times = [];
-                    if (isGlEdited) times.push({ time: glUpdated, user: gl.updatedBy || gl.username || 'Admin' });
-                    if (isLabEdited) times.push({ time: labUpdated, user: lab.updatedBy || lab.username || 'Admin' });
-                    if (isProdEdited) times.push({ time: prodUpdated, user: prod.updatedBy || prod.username || 'Admin' });
-
-                    if (times.length > 0) {
-                        times.sort((a, b) => b.time - a.time);
-                        lastUpdatedDate = new Date(times[0].time).toISOString().split('T')[0];
-                        editedBy = times[0].user;
-                    }
-                }
-
-                let rType = 'M/R';
-                if (lab && lab.rollingType) {
-                    if (lab.rollingType === 'Machine Rolling') rType = 'M/R';
-                    else if (lab.rollingType === 'Hand Rolling') rType = 'H/R';
-                    else rType = lab.rollingType;
-                }
-                
-                return {
-                    date: dateStr,
-                    isEdited,
-                    lastUpdatedDate,
-                    editedBy, 
-                    greenLeafId: gl ? gl._id : null,
-                    productionId: prod._id, 
-                    labourId: lab ? lab._id : null,
-                    totalWeight: gl ? gl.totalWeight : 0,
-                    selectedWeight: gl ? gl.selectedWeight : 0,
-                    returnedWeight: gl ? gl.returnedWeight : 0,
-                    teaType: prod.teaType || '-',
-                    madeTeaWeight: prod.madeTeaWeight || 0,
-                    dryerName: prod?.dryerDetails?.dryerName || '-',
-                    meterStart: prod?.dryerDetails?.meterStart ?? '-',
-                    meterEnd: prod?.dryerDetails?.meterEnd ?? '-',
-                    units: prod?.dryerDetails?.units ?? 0,
-                    rollerPoints: prod?.dryerDetails?.rollerPoints ?? 0, 
-                    dryerUpdatedDate: (prod?.dryerDetails?.dryerName && prod.updatedAt) 
-                        ? new Date(prod.updatedAt).toISOString().split('T')[0] 
-                        : '-',
-                    workerCount: lab ? lab.workerCount : 0,
-                    rollingType: rType,
-                    rollingWorkerCount: (lab && lab.rollingType === 'Hand Rolling') ? lab.rollingWorkerCount : 0
-                };
-            });
-
-            mergedData.sort((a, b) => new Date(b.date) - new Date(a.date));
-            setRecords(mergedData);
-        } catch (error) {
-            console.error("Fetch Error:", error);
-            toast.error(error.message || "Could not load data from server.");
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const filteredRecords = records.filter(record => {
-        const dateMatch = (!startDate || record.date >= startDate) && (!endDate || record.date <= endDate);
-        const typeMatch = teaType === 'All' || record.teaType === teaType;
-        const dryerMatch = dryerType === 'All' || record.dryerName === dryerType;
-        return dateMatch && typeMatch && dryerMatch;
-    });
-
-    const groupMap = {};
-    filteredRecords.forEach(r => {
-        if (r.meterStart !== '-' && r.meterEnd !== '-' && r.meterStart !== '' && r.meterEnd !== '') {
-            const key = `${r.dryerName}_${r.meterStart}_${r.meterEnd}`;
-            if (!groupMap[key]) {
-                groupMap[key] = { count: 0, uiColor: '', pdfColor: [] };
-            }
-            groupMap[key].count += 1;
-        }
-    });
-
-    const highlightColors = [
-        { ui: 'bg-green-200/80 dark:bg-green-900/40', pdf: '#bbf7d0' },
-        { ui: 'bg-yellow-200/80 dark:bg-yellow-900/40', pdf: '#fef08a' },
-        { ui: 'bg-purple-200/80 dark:bg-purple-900/40', pdf: '#e9d5ff' },
-        { ui: 'bg-blue-200/80 dark:bg-blue-900/40', pdf: '#bfdbfe' },
-        { ui: 'bg-pink-200/80 dark:bg-pink-900/40', pdf: '#fbcfe8' },
-        { ui: 'bg-orange-200/80 dark:bg-orange-900/40', pdf: '#fed7aa' }
-    ];
-    let colorIndex = 0;
-
-    Object.keys(groupMap).forEach(key => {
-        if (groupMap[key].count > 1) {
-            const colorObj = highlightColors[colorIndex % highlightColors.length];
-            groupMap[key].uiColor = colorObj.ui;
-            groupMap[key].pdfColor = colorObj.pdf;
-            colorIndex++;
-        }
-    });
-
-    const totalGL = filteredRecords.reduce((sum, r) => sum + (Number(r.totalWeight) || 0), 0);
-    const totalSelectedGL = filteredRecords.reduce((sum, r) => sum + (Number(r.selectedWeight) || 0), 0);
-    const totalReturnedGL = filteredRecords.reduce((sum, r) => sum + (Number(r.returnedWeight) || 0), 0);
-    const totalMadeTea = filteredRecords.reduce((sum, r) => sum + (Number(r.madeTeaWeight) || 0), 0);
-    const totalSelectionLabour = filteredRecords.reduce((sum, r) => sum + (Number(r.workerCount) || 0), 0);
-    const totalHandRollingLabour = filteredRecords.reduce((sum, r) => sum + (Number(r.rollingWorkerCount) || 0), 0);
-
-    const totalUnits = filteredRecords.reduce((sum, r) => {
-        if (r.meterStart !== '-' && r.meterEnd !== '-' && r.meterStart !== '' && r.meterEnd !== '') {
-            const key = `${r.dryerName}_${r.meterStart}_${r.meterEnd}`;
-            const count = groupMap[key]?.count || 1;
-            return sum + ((Number(r.units) || 0) / count);
-        }
-        return sum + (Number(r.units) || 0);
-    }, 0);
-
-    const totalRollerPoints = filteredRecords.reduce((sum, r) => {
-        if (r.meterStart !== '-' && r.meterEnd !== '-' && r.meterStart !== '' && r.meterEnd !== '') {
-            const key = `${r.dryerName}_${r.meterStart}_${r.meterEnd}`;
-            const count = groupMap[key]?.count || 1;
-            return sum + ((Number(r.rollerPoints) || 0) / count);
-        }
-        return sum + (Number(r.rollerPoints) || 0);
-    }, 0);
-
-    const handleEditClick = (record) => {
-        navigation('/edit-record', { state: { recordData: record } });
-    };
-
-    const handleConfirmDelete = async () => {
-        if (!recordToDelete) return;
-        const { greenLeafId, productionId, labourId } = recordToDelete;
-        const toastId = toast.loading('Deleting record...');
-        try {
-            const token = localStorage.getItem('token');
-            const authHeaders = { 'Authorization': `Bearer ${token}` };
-
-            const promises = [];
-            if (greenLeafId) promises.push(fetch(`${BACKEND_URL}/api/green-leaf/${greenLeafId}`, { method: 'DELETE', headers: authHeaders }));
-            if (productionId) promises.push(fetch(`${BACKEND_URL}/api/production/${productionId}`, { method: 'DELETE', headers: authHeaders }));
-            if (labourId) promises.push(fetch(`${BACKEND_URL}/api/labour/${labourId}`, { method: 'DELETE', headers: authHeaders }));
-
-            await Promise.all(promises);
-            toast.success("Record deleted successfully!", { id: toastId });
-            fetchMergedRecords(); 
-        } catch (error) {
-            console.error("Delete Error:", error);
-            toast.error("Failed to delete record.", { id: toastId });
-        } finally {
-            setRecordToDelete(null);
-        }
-    };
-
-    const getPdfData = () => {
-        const tableRows = filteredRecords.map(record => {
-            let displayUnits = record.units;
-            let displayRollerPoints = record.rollerPoints; 
-            let rowColor = null;
-
-            if (record.meterStart !== '-' && record.meterEnd !== '-' && record.meterStart !== '' && record.meterEnd !== '') {
-                const key = `${record.dryerName}_${record.meterStart}_${record.meterEnd}`;
-                const groupInfo = groupMap[key];
-                if (groupInfo && groupInfo.count > 1) {
-                    const adjustedUnits = Number(record.units) / groupInfo.count;
-                    displayUnits = Number.isInteger(adjustedUnits) ? adjustedUnits : adjustedUnits.toFixed(2);
-                    
-                    const adjustedRoller = Number(record.rollerPoints) / groupInfo.count;
-                    displayRollerPoints = Number.isInteger(adjustedRoller) ? adjustedRoller : adjustedRoller.toFixed(2);
-                    
-                    rowColor = groupInfo.pdfColor; 
-                }
-            }
-
-            const pdfDryerName = record.dryerName !== '-' 
-                ? `${record.dryerName}\n(${record.dryerUpdatedDate})` 
-                : '-';
-
-            const pdfDateCell = record.isEdited 
-                ? `${record.date}\n(Edited: ${record.lastUpdatedDate} by ${record.editedBy})` 
-                : record.date;
-            
-            const rollingText = record.rollingType === 'H/R' 
-                ? `H/R\n(${record.rollingWorkerCount} wkrs)` 
-                : record.rollingType;
-
-            return {
-                data: [
-                    pdfDateCell,
-                    record.totalWeight,
-                    record.selectedWeight,
-                    record.returnedWeight > 0 ? record.returnedWeight : '-',
-                    record.teaType,
-                    record.madeTeaWeight,
-                    pdfDryerName,
-                    record.meterStart,
-                    record.meterEnd,
-                    displayUnits !== '-' ? displayUnits : '-',
-                    displayRollerPoints !== '-' ? displayRollerPoints : '-', 
-                    record.workerCount !== '-' ? record.workerCount : '-',
-                    rollingText
-                ],
-                fillColor: rowColor 
-            };
-        });
-
-        tableRows.push({
-            data: [
-                "GRAND TOTAL",
-                totalGL.toFixed(2),
-                totalSelectedGL.toFixed(2),
-                totalReturnedGL.toFixed(2),
-                "-",
-                totalMadeTea.toFixed(3),
-                "-",
-                "-",
-                "-",
-                Number.isInteger(totalUnits) ? totalUnits : totalUnits.toFixed(2),
-                Number.isInteger(totalRollerPoints) ? totalRollerPoints : totalRollerPoints.toFixed(2), 
-                totalSelectionLabour,
-                totalHandRollingLabour > 0 ? `${totalHandRollingLabour} (H/R)` : '-'
-            ],
-            isFooter: true
-        });
-
-        return tableRows;
-    };
-
-    const getCurrentMonthCode = () => {
-        const date = new Date();
-        const month = date.toLocaleString('default', { month: 'long' }).toUpperCase();
-        const year = date.getFullYear();
-        return `HT/DR/${month}.${year}`; 
-    };
-
-    const uniqueCode = getCurrentMonthCode();
+    const [existingDates, setExistingDates] = useState([]);
+    const [lastReadings, setLastReadings] = useState({ 'Dryer 1': '', 'Dryer 2': '' });
+    const [allProductionData, setAllProductionData] = useState([]);
 
     // ==========================================
     // ADD NEW RECORD FORM STATES (DAY 1)
@@ -387,44 +32,36 @@ export default function GreenLeafForm() {
 
     const getTodayLocalString = () => {
         const today = new Date();
-        return today.getFullYear() + '-' + 
-               String(today.getMonth() + 1).padStart(2, '0') + '-' + 
-               String(today.getDate()).padStart(2, '0');
+        return today.getFullYear() + '-' +
+            String(today.getMonth() + 1).padStart(2, '0') + '-' +
+            String(today.getDate()).padStart(2, '0');
     };
 
-    // Removed outputs from Day 1 Form Data
     const [formData, setFormData] = useState({
         date: getTodayLocalString(),
         totalWeight: '',
         selectedWeight: '',
-        expectedDryerDate: '', 
+        expectedDryerDate: '',
         workerCount: '',
         rollingType: 'Machine Rolling1',
         rollingWorkerCount: ''
     });
 
-    const [existingDates, setExistingDates] = useState([]);
-    const [lastReadings, setLastReadings] = useState({ 'Dryer 1': '', 'Dryer 2': '' });
-    const [allProductionData, setAllProductionData] = useState([]); 
-
     // ==========================================
-    // DRYER POPUP STATES (DAY 2) - UPDATED FOR MULTIPLE OUTPUTS & DRYERS
+    // DRYER POPUP STATES (DAY 2) - UNIFIED OUTPUTS
     // ==========================================
     const [pendingDryerTasks, setPendingDryerTasks] = useState([]);
     const [activeTaskIndex, setActiveTaskIndex] = useState(0);
     const [isSubmittingDryer, setIsSubmittingDryer] = useState(false);
-    
-    // Moved Production Outputs to Day 2 Modal state
-    const [modalOutputs, setModalOutputs] = useState([{
-        teaType: '',
-        madeTeaWeight: ''
-    }]);
 
-    const [dryerOutputs, setDryerOutputs] = useState([{
+    const [productionOutputs, setProductionOutputs] = useState([{
+        teaType: '',
+        selectedTeaWeight: '',
+        madeTeaWeight: '',
         dryerName: '',
         meterStart: '',
         meterEnd: '',
-        rollerPoints: '' 
+        rollerPoints: ''
     }]);
 
     useEffect(() => {
@@ -445,16 +82,25 @@ export default function GreenLeafForm() {
                 fetch(`${BACKEND_URL}/api/production`, { headers: authHeaders })
             ]);
 
-            if (glRes.ok) {
+            if (glRes.ok && prodRes.ok) {
                 const glData = await glRes.json();
+                const rawProdData = await prodRes.json();
+
                 const dates = glData.map(record => record.date ? record.date.substring(0, 10) : '');
                 setExistingDates(dates);
-            }
 
-            if (prodRes.ok) {
-                const prodData = await prodRes.json();
-                prodData.sort((a, b) => new Date(b.date) - new Date(a.date)); 
-                setAllProductionData(prodData); 
+                // Map Green Leaf Selected Weight into Production Data for validation
+                const prodData = rawProdData.map(p => {
+                    const pDateStr = p.date ? p.date.substring(0, 10) : '';
+                    const matchedGL = glData.find(g => g.date && g.date.substring(0, 10) === pDateStr);
+                    return {
+                        ...p,
+                        glSelectedWeight: matchedGL ? Number(matchedGL.selectedWeight) : 0
+                    };
+                });
+
+                prodData.sort((a, b) => new Date(b.date) - new Date(a.date));
+                setAllProductionData(prodData);
 
                 let d1Last = '';
                 let d2Last = '';
@@ -476,7 +122,7 @@ export default function GreenLeafForm() {
                 });
 
                 if (tasksNeedingDryer.length > 0) {
-                    setPendingDryerTasks(tasksNeedingDryer.reverse()); 
+                    setPendingDryerTasks(tasksNeedingDryer.reverse());
                 }
             }
         } catch (error) {
@@ -494,8 +140,7 @@ export default function GreenLeafForm() {
         if (tasksForDate.length > 0) {
             setPendingDryerTasks(tasksForDate);
             setActiveTaskIndex(0);
-            setDryerOutputs([{ dryerName: '', meterStart: '', meterEnd: '', rollerPoints: '' }]);
-            setModalOutputs([{ teaType: '', madeTeaWeight: '' }]); // Reset Modal outputs
+            setProductionOutputs([{ teaType: '', selectedTeaWeight: '', madeTeaWeight: '', dryerName: '', meterStart: '', meterEnd: '', rollerPoints: '' }]);
             toast.success(`Found ${tasksForDate.length} pending task(s) expected to be dried on this date!`);
         } else {
             toast.success("No pending dryer tasks scheduled for this date.");
@@ -513,72 +158,61 @@ export default function GreenLeafForm() {
         }
     };
 
-    // --- MODAL PRODUCTION OUTPUT HANDLERS ---
-    const handleModalOutputChange = (index, field, value) => {
-        const newOutputs = [...modalOutputs];
+    const handleOutputChange = (index, field, value) => {
+        const newOutputs = [...productionOutputs];
         newOutputs[index][field] = value;
-        setModalOutputs(newOutputs);
-    };
+        const currentDryer = newOutputs[index].dryerName;
 
-    const addModalOutput = () => {
-        setModalOutputs([...modalOutputs, { teaType: '', madeTeaWeight: '' }]);
-    };
+        // 1. Handle Dryer Selection
+        if (field === 'dryerName' && value !== '') {
+            // Fallback to database last readings first
+            if (lastReadings[value] !== undefined) {
+                newOutputs[index].meterStart = String(lastReadings[value]);
+            }
 
-    const removeModalOutput = (index) => {
-        const newOutputs = modalOutputs.filter((_, i) => i !== index);
-        setModalOutputs(newOutputs);
-    };
-
-    // --- DRYER MODAL HANDLERS ---
-    const handleDryerOutputChange = (index, field, value) => {
-        const newDryers = [...dryerOutputs];
-        newDryers[index][field] = value;
-
-        if (field === 'dryerName') {
-            newDryers[index].meterStart = lastReadings[value] !== undefined ? String(lastReadings[value]) : '';
+            // Find if this dryer is already active in another output block
+            const existingBlock = newOutputs.find((out, i) => i !== index && out.dryerName === value);
+            if (existingBlock) {
+                // Auto-sync meter readings from the existing block
+                newOutputs[index].meterStart = existingBlock.meterStart;
+                newOutputs[index].meterEnd = existingBlock.meterEnd;
+            }
         }
-        setDryerOutputs(newDryers);
-    };
 
-    const addDryerOutput = () => {
-        setDryerOutputs([...dryerOutputs, { dryerName: '', meterStart: '', meterEnd: '', rollerPoints: '' }]);
-    };
-
-    const removeDryerOutput = (index) => {
-        setDryerOutputs(dryerOutputs.filter((_, i) => i !== index));
-    };
-
-    const playErrorSound = () => {
-        try {
-            const ctx = new (window.AudioContext || window.webkitAudioContext)();
-            const osc = ctx.createOscillator();
-            const gainNode = ctx.createGain();
-            osc.type = 'square'; 
-            osc.frequency.setValueAtTime(150, ctx.currentTime); 
-            gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
-            gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
-            osc.connect(gainNode); gainNode.connect(ctx.destination);
-            osc.start(); osc.stop(ctx.currentTime + 0.3);
-        } catch (e) {
-            console.log("Audio not supported");
+        // 2. Handle Meter Updates (Sync across matching dryers)
+        if ((field === 'meterStart' || field === 'meterEnd') && currentDryer) {
+            newOutputs.forEach(out => {
+                if (out.dryerName === currentDryer) {
+                    out[field] = value;
+                }
+            });
         }
+
+        setProductionOutputs(newOutputs);
+    };
+
+    const addOutput = () => {
+        setProductionOutputs([...productionOutputs, {
+            teaType: '', selectedTeaWeight: '', madeTeaWeight: '',
+            dryerName: '', meterStart: '', meterEnd: '', rollerPoints: ''
+        }]);
+    };
+
+    const removeOutput = (index) => {
+        setProductionOutputs(productionOutputs.filter((_, i) => i !== index));
     };
 
     const handleAddToList = (e) => {
         e.preventDefault();
 
-        // 1. දැනටමත් Database එකේ මේ දවස තියෙනවදැයි බැලීම
         if (existingDates.includes(formData.date)) {
-            playErrorSound(); 
-            toast.error(`A record for ${formData.date} already exists in the database!`); 
+            toast.error(`A record for ${formData.date} already exists in the database!`);
             return;
         }
 
-        // 2. දැනටමත් Pending Queue එකේ මේ දවස තියෙනවදැයි බැලීම
         const isAlreadyInQueue = pendingRecords.some(r => r.date === formData.date);
         if (isAlreadyInQueue) {
-            playErrorSound(); 
-            toast.error(`A record for ${formData.date} is already in the pending list!`); 
+            toast.error(`A record for ${formData.date} is already in the pending list!`);
             return;
         }
 
@@ -586,10 +220,10 @@ export default function GreenLeafForm() {
         const selected = Number(formData.selectedWeight);
 
         if (selected > total) {
-            playErrorSound(); toast.error("Selected weight must be less than Total weight!"); return;
+            toast.error("Selected weight must be less than Total weight!"); return;
         }
         if (formData.expectedDryerDate < formData.date) {
-            playErrorSound(); toast.error("Expected Dryer Date cannot be before the collection date!"); return;
+            toast.error("Expected Dryer Date cannot be before the collection date!"); return;
         }
 
         const newRecord = { ...formData, returnedWeight };
@@ -598,11 +232,11 @@ export default function GreenLeafForm() {
 
         setFormData({
             ...formData,
-            totalWeight: '', 
-            selectedWeight: '', 
-            expectedDryerDate: '', 
-            workerCount: '', 
-            rollingType: 'Machine Rolling1', 
+            totalWeight: '',
+            selectedWeight: '',
+            expectedDryerDate: '',
+            workerCount: '',
+            rollingType: 'Machine Rolling1',
             rollingWorkerCount: ''
         });
     };
@@ -624,13 +258,12 @@ export default function GreenLeafForm() {
             const token = localStorage.getItem('token');
             const authHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
 
-            // Promise.all වෙනුවට for...of භාවිතා කිරීමෙන් රෙකෝඩ්ස් පිළිවෙලට එකින් එක සේව් වේ (Overload නොවේ)
             for (const record of pendingRecords) {
                 const total = Number(record.totalWeight);
                 const selected = Number(record.selectedWeight);
 
                 const greenLeafPayload = { date: record.date, totalWeight: total, selectedWeight: selected };
-                const labourPayload = { 
+                const labourPayload = {
                     date: record.date, workerCount: Number(record.workerCount), rollingType: record.rollingType,
                     rollingWorkerCount: record.rollingType === 'Hand Rolling' ? Number(record.rollingWorkerCount) : 0
                 };
@@ -645,16 +278,15 @@ export default function GreenLeafForm() {
                     throw new Error(`Failed to save GL or Labour record for ${record.date}`);
                 }
 
-                // Create a single placeholder Production record waiting for Dryer Date
-                const productionPayload = { 
-                    date: record.date, 
-                    teaType: "-", 
-                    madeTeaWeight: 0, 
-                    expectedDryerDate: record.expectedDryerDate 
+                const productionPayload = {
+                    date: record.date,
+                    teaType: "-",
+                    madeTeaWeight: 0,
+                    expectedDryerDate: record.expectedDryerDate
                 };
-                
+
                 const prodRes = await fetch(`${BACKEND_URL}/api/production`, { method: 'POST', headers: authHeaders, body: JSON.stringify(productionPayload) });
-                
+
                 if (!prodRes.ok) {
                     if (prodRes.status === 403) throw new Error('Access Denied');
                     throw new Error(`Failed to save Production record for ${record.date}`);
@@ -663,17 +295,15 @@ export default function GreenLeafForm() {
 
             toast.success("All records saved successfully!", { id: toastId });
             setExistingDates([...existingDates, ...pendingRecords.map(r => r.date)]);
-            setPendingRecords([]); 
-            
-            setTimeout(() => { 
+            setPendingRecords([]);
+
+            setTimeout(() => {
                 fetchInitialData();
-                fetchMergedRecords();
             }, 1000);
-            
+
             navigation('/view-green-leaf');
 
         } catch (error) {
-            playErrorSound();
             if (error.message === 'Access Denied') {
                 toast.error("Access Denied. You do not have permission.", { id: toastId });
             } else {
@@ -686,107 +316,88 @@ export default function GreenLeafForm() {
 
     const handleModalSubmit = async (e) => {
         e.preventDefault();
-        
-        // Validate Modal Production Outputs
-        for (let out of modalOutputs) {
-            if (!out.teaType || !out.madeTeaWeight) {
-                toast.error("Please fill all tea types and weights!");
+
+        const currentTask = pendingDryerTasks[activeTaskIndex];
+        let totalSelectedEntered = 0;
+
+        // Validation & Accumulation
+        for (let out of productionOutputs) {
+            if (!out.teaType || out.selectedTeaWeight === '' || out.madeTeaWeight === '' || !out.dryerName || out.meterStart === '' || out.meterEnd === '') {
+                toast.error("Please fill all required fields in all blocks!");
                 return;
             }
+            if (Number(out.meterEnd) < Number(out.meterStart)) {
+                toast.error(`End Reading must be greater than Start Reading for ${out.dryerName || 'the dryer'}!`);
+                return;
+            }
+            totalSelectedEntered += Number(out.selectedTeaWeight);
         }
 
-        // Validate Dryers
-        for (let dryer of dryerOutputs) {
-            if (!dryer.dryerName || !dryer.meterStart || !dryer.meterEnd) {
-                toast.error("Please fill all dryer details completely!");
-                return;
-            }
-            if (Number(dryer.meterEnd) < Number(dryer.meterStart)) {
-                playErrorSound(); 
-                toast.error("End Reading must be greater than Start Reading!"); 
-                return;
-            }
+        // Limit Check against Green Leaf amount
+        if (totalSelectedEntered > currentTask.glSelectedWeight) {
+            toast.error(`Total Selected Tea (${totalSelectedEntered}kg) cannot exceed the Green Leaf limit (${currentTask.glSelectedWeight}kg)!`);
+            return;
         }
 
         setIsSubmittingDryer(true);
         const toastId = toast.loading("Saving details...");
-        const currentTask = pendingDryerTasks[activeTaskIndex];
 
         try {
             const token = localStorage.getItem('token');
             const authHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
 
-            const firstOutput = modalOutputs[0];
-            const firstDryer = dryerOutputs[0];
-
-            // 1. Update the Placeholder task with first Output and first Dryer
-            const updatePayload = {
-                teaType: firstOutput.teaType,
-                madeTeaWeight: Number(firstOutput.madeTeaWeight),
-                dryerDetails: {
-                    dryerName: firstDryer.dryerName, 
-                    meterStart: Number(firstDryer.meterStart), 
-                    meterEnd: Number(firstDryer.meterEnd), 
-                    rollerPoints: Number(firstDryer.rollerPoints || 0)
-                }
-            };
-
-            const res = await fetch(`${BACKEND_URL}/api/production/${currentTask._id}`, {
-                method: 'PUT', headers: authHeaders, body: JSON.stringify(updatePayload)
-            });
-
-            if (!res.ok) throw new Error("Failed to update record");
-
-            // Update local state for last readings
-            setLastReadings(prev => {
-                const newReadings = { ...prev };
-                dryerOutputs.forEach(d => { newReadings[d.dryerName] = Number(d.meterEnd); });
-                return newReadings;
-            });
-
             const extraPromises = [];
 
-            // 2. If there are extra Outputs (Tea Types), create new records using the FIRST Dryer
-            for (let i = 1; i < modalOutputs.length; i++) {
-                const extraOutputPayload = {
-                    date: currentTask.date,
-                    teaType: modalOutputs[i].teaType,
-                    madeTeaWeight: Number(modalOutputs[i].madeTeaWeight),
-                    expectedDryerDate: currentTask.expectedDryerDate,
-                    dryerDetails: updatePayload.dryerDetails // Same dryer as first
-                };
-                extraPromises.push(fetch(`${BACKEND_URL}/api/production`, { method: 'POST', headers: authHeaders, body: JSON.stringify(extraOutputPayload) }));
-            }
+            for (let i = 0; i < productionOutputs.length; i++) {
+                const out = productionOutputs[i];
 
-            // 3. If there are extra Dryers, create new records mapped to the FIRST Output (but 0 weight to not duplicate yield)
-            for (let j = 1; j < dryerOutputs.length; j++) {
-                const extraDryerPayload = {
+                const payload = {
                     date: currentTask.date,
-                    teaType: firstOutput.teaType, // Link to first tea type
-                    madeTeaWeight: 0, // 0 to avoid duplicating the made tea weight
                     expectedDryerDate: currentTask.expectedDryerDate,
+                    teaType: out.teaType,
+                    selectedTeaWeight: Number(out.selectedTeaWeight),
+                    madeTeaWeight: Number(out.madeTeaWeight),
                     dryerDetails: {
-                        dryerName: dryerOutputs[j].dryerName,
-                        meterStart: Number(dryerOutputs[j].meterStart),
-                        meterEnd: Number(dryerOutputs[j].meterEnd),
-                        rollerPoints: Number(dryerOutputs[j].rollerPoints || 0)
+                        dryerName: out.dryerName,
+                        meterStart: Number(out.meterStart),
+                        meterEnd: Number(out.meterEnd),
+                        rollerPoints: Number(out.rollerPoints || 0)
                     }
                 };
-                extraPromises.push(fetch(`${BACKEND_URL}/api/production`, { method: 'POST', headers: authHeaders, body: JSON.stringify(extraDryerPayload) }));
+
+                if (i === 0) {
+                    const res = await fetch(`${BACKEND_URL}/api/production/${currentTask._id}`, {
+                        method: 'PUT', headers: authHeaders, body: JSON.stringify(payload)
+                    });
+                    if (!res.ok) throw new Error("Failed to update initial record");
+                } else {
+                    extraPromises.push(
+                        fetch(`${BACKEND_URL}/api/production`, {
+                            method: 'POST', headers: authHeaders, body: JSON.stringify(payload)
+                        })
+                    );
+                }
             }
 
-            await Promise.all(extraPromises);
+            if (extraPromises.length > 0) {
+                await Promise.all(extraPromises);
+            }
+
+            setLastReadings(prev => {
+                const newReadings = { ...prev };
+                productionOutputs.forEach(out => { newReadings[out.dryerName] = Number(out.meterEnd); });
+                return newReadings;
+            });
 
             toast.success("Production & Dryer details saved!", { id: toastId });
 
             if (activeTaskIndex < pendingDryerTasks.length - 1) {
                 setActiveTaskIndex(prev => prev + 1);
-                setDryerOutputs([{ dryerName: '', meterStart: '', meterEnd: '', rollerPoints: '' }]);
-                setModalOutputs([{ teaType: '', madeTeaWeight: '' }]);
+                setProductionOutputs([{ teaType: '', selectedTeaWeight: '', madeTeaWeight: '', dryerName: '', meterStart: '', meterEnd: '', rollerPoints: '' }]);
             } else {
-                setPendingDryerTasks([]); 
+                setPendingDryerTasks([]);
                 toast.success("All pending dryer tasks complete!");
-                fetchMergedRecords();
+                setTimeout(() => { fetchInitialData(); }, 500);
             }
         } catch (error) {
             toast.error("Error saving details.", { id: toastId });
@@ -795,22 +406,12 @@ export default function GreenLeafForm() {
         }
     };
 
-    const handleCancel = () => {
-        if (pendingRecords.length > 0) {
-            if (window.confirm("You have unsaved records in the list. Are you sure you want to leave?")) {
-                navigation(-1);
-            }
-        } else {
-            navigation(-1);
-        }
-    };
-
     const inputStyles = "w-full p-3.5 border border-gray-200 dark:border-zinc-800 rounded-xl bg-gray-50 dark:bg-zinc-900 text-gray-900 dark:text-gray-100 focus:ring-4 focus:ring-green-500/20 focus:border-green-500 outline-none transition-all disabled:bg-gray-100 disabled:text-gray-400 dark:disabled:bg-zinc-800/50 dark:disabled:text-zinc-600 disabled:cursor-not-allowed";
     const labelStyles = "block text-[11px] font-bold text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wider";
 
     return (
         <div className="min-h-screen bg-gray-50/50 dark:bg-zinc-950 transition-colors duration-300 pb-20">
-            
+
             {/* --- TOP HEADER NAVIGATION --- */}
             <div className="sticky top-0 z-40 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-xl border-b border-gray-200 dark:border-zinc-800 shadow-sm px-8 py-4 mb-8 flex justify-between items-center transition-colors duration-300">
                 <div>
@@ -856,96 +457,95 @@ export default function GreenLeafForm() {
                                 </div>
 
                                 <form onSubmit={handleModalSubmit} className="space-y-6">
-                                    
-                                    {/* --- ADDED PRODUCTION OUTPUT SECTION TO MODAL --- */}
                                     <div className="bg-purple-50/50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800/50 rounded-2xl p-5 shadow-sm">
                                         <div className="flex justify-between items-center mb-4">
                                             <h3 className="text-md font-bold text-purple-700 dark:text-purple-400 flex items-center gap-2">
-                                                <div className="p-1.5 bg-purple-100 dark:bg-purple-500/20 rounded-md"><Factory size={16}/></div>
-                                                Production Output
+                                                <div className="p-1.5 bg-purple-100 dark:bg-purple-500/20 rounded-md"><Factory size={16} /></div>
+                                                Production & Dryer Details
                                             </h3>
-                                            <button type="button" onClick={addModalOutput} className="text-xs font-bold text-purple-600 hover:text-purple-800 dark:text-purple-400 flex items-center gap-1 bg-purple-100 hover:bg-purple-200 dark:bg-purple-900/30 px-2.5 py-1.5 rounded-lg transition-colors">
+                                            <button type="button" onClick={addOutput} className="text-xs font-bold text-purple-600 hover:text-purple-800 dark:text-purple-400 flex items-center gap-1 bg-purple-100 hover:bg-purple-200 dark:bg-purple-900/30 px-2.5 py-1.5 rounded-lg transition-colors">
                                                 <PlusCircle size={14} /> Add Type
                                             </button>
                                         </div>
 
-                                        <div className="space-y-3">
-                                            {modalOutputs.map((out, index) => (
-                                                <div key={index} className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-white dark:bg-zinc-900 p-4 rounded-xl border border-purple-100 dark:border-purple-900/30 relative">
-                                                    {modalOutputs.length > 1 && (
-                                                        <button type="button" onClick={() => removeModalOutput(index)} className="absolute -top-2 -right-2 bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-400 p-1.5 rounded-full hover:bg-red-200 transition-colors shadow-sm">
+                                        <div className="space-y-6">
+                                            {productionOutputs.map((out, index) => (
+                                                <div key={index} className="bg-white dark:bg-zinc-900 p-5 rounded-xl border border-purple-100 dark:border-purple-900/30 relative shadow-sm">
+                                                    {productionOutputs.length > 1 && (
+                                                        <button type="button" onClick={() => removeOutput(index)} className="absolute -top-3 -right-3 bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-400 p-1.5 rounded-full hover:bg-red-200 transition-colors shadow-sm">
                                                             <X size={14} />
                                                         </button>
                                                     )}
-                                                    <div>
-                                                        <label className={labelStyles}>Tea Type</label>
-                                                        <select value={out.teaType} onChange={(e) => handleModalOutputChange(index, 'teaType', e.target.value)} required className={inputStyles}>
-                                                            <option value="">Select Type...</option>
-                                                            <option value="Purple Tea">Purple Tea</option>
-                                                            <option value="Pink Tea">Pink Tea</option>
-                                                            <option value="White Tea">White Tea</option>
-                                                            <option value="Silver Tips">Silver Tips</option>
-                                                            <option value="Silver Green">Silver Green</option>
-                                                            <option value="VitaGlow Tea">VitaGlow Tea</option>
-                                                            <option value="Slim Beauty">Slim Beauty</option>
-                                                            <option value="Golden Tips">Golden Tips</option>
-                                                            <option value="Flower">Flower</option>
-                                                            <option value="Chakra">Chakra</option>
-                                                            <option value="Other">Other</option>
-                                                        </select>
-                                                    </div>
-                                                    <div>
-                                                        <label className={labelStyles}>Made Tea (kg)</label>
-                                                        <input type="number" step="0.001" min="0" value={out.madeTeaWeight} onChange={(e) => handleModalOutputChange(index, 'madeTeaWeight', e.target.value)} onWheel={(e) => e.target.blur()} required className={inputStyles} />
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                    {/* ----------------------------------------------- */}
 
-                                    <div>
-                                        <div className="flex justify-between items-center mb-4">
-                                            <h3 className="text-md font-bold text-gray-800 dark:text-gray-200 flex items-center gap-2">
-                                                <div className="p-1.5 bg-orange-100 dark:bg-orange-500/20 rounded-md text-orange-600"><Zap size={16}/></div>
-                                                Dryer Readings
-                                            </h3>
-                                            <button type="button" onClick={addDryerOutput} className="text-xs font-bold text-orange-600 dark:text-orange-400 flex items-center gap-1 bg-orange-50 dark:bg-orange-900/30 px-2.5 py-1.5 rounded-lg hover:bg-orange-100 transition-colors">
-                                                <PlusCircle size={14} /> Add Dryer
-                                            </button>
-                                        </div>
-
-                                        <div className="space-y-3">
-                                            {dryerOutputs.map((dryer, index) => (
-                                                <div key={index} className="p-4 border border-orange-100 dark:border-orange-900/30 rounded-xl bg-orange-50/30 dark:bg-orange-900/5 relative shadow-sm">
-                                                    {dryerOutputs.length > 1 && (
-                                                        <button type="button" onClick={() => removeDryerOutput(index)} className="absolute -top-2 -right-2 bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-400 p-1.5 rounded-full hover:bg-red-200 transition-colors shadow-sm">
-                                                            <X size={14} />
-                                                        </button>
-                                                    )}
-                                                    
-                                                    <div className="space-y-4">
+                                                    <h4 className="text-xs font-bold text-gray-500 uppercase mb-3">Tea Output Info</h4>
+                                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                                                         <div>
-                                                            <label className={labelStyles}>Select Dryer</label>
-                                                            <select name="dryerName" value={dryer.dryerName} onChange={(e) => handleDryerOutputChange(index, 'dryerName', e.target.value)} required className={inputStyles}>
-                                                                <option value="">Choose...</option>
-                                                                <option value="Dryer 1">Dryer 1</option>
-                                                                <option value="Dryer 2">Dryer 2</option>
+                                                            <label className={labelStyles}>Tea Type</label>
+                                                            <select value={out.teaType} onChange={(e) => handleOutputChange(index, 'teaType', e.target.value)} required className={inputStyles}>
+                                                                <option value="">Select Type...</option>
+                                                                <option value="Purple Tea">Purple Tea</option>
+                                                                <option value="Pink Tea">Pink Tea</option>
+                                                                <option value="White Tea">White Tea</option>
+                                                                <option value="Silver Tips">Silver Tips</option>
+                                                                <option value="Silver Green">Silver Green</option>
+                                                                <option value="VitaGlow Tea">VitaGlow Tea</option>
+                                                                <option value="Slim Beauty">Slim Beauty</option>
+                                                                <option value="Golden Tips">Golden Tips</option>
+                                                                <option value="Flower">Flower</option>
+                                                                <option value="Chakra">Chakra</option>
+                                                                <option value="Other">Other</option>
                                                             </select>
                                                         </div>
-                                                        <div className="grid grid-cols-2 gap-4">
-                                                            <div>
-                                                                <label className={labelStyles}>Start Reading</label>
-                                                                <input type="number" min="0" value={dryer.meterStart} onChange={(e) => handleDryerOutputChange(index, 'meterStart', e.target.value)} onWheel={(e) => e.target.blur()} required className={inputStyles} />
-                                                            </div>
-                                                            <div>
-                                                                <label className={labelStyles}>End Reading</label>
-                                                                <input type="number" min="0" value={dryer.meterEnd} onChange={(e) => handleDryerOutputChange(index, 'meterEnd', e.target.value)} onWheel={(e) => e.target.blur()} required className={inputStyles} />
-                                                            </div>
+                                                        <div>
+                                                            <label className={labelStyles}>
+                                                                Selected Tea (KG)
+                                                                <span className="ml-1 text-[9px] text-blue-600 dark:text-blue-400 normal-case bg-blue-50 dark:bg-blue-900/30 px-1 py-0.5 rounded">
+                                                                    Max: {pendingDryerTasks[activeTaskIndex]?.glSelectedWeight || 0}kg
+                                                                </span>
+                                                            </label>
+                                                            <input
+                                                                type="number"
+                                                                step="0.01"
+                                                                min="0"
+                                                                max={pendingDryerTasks[activeTaskIndex]?.glSelectedWeight || ''}
+                                                                value={out.selectedTeaWeight}
+                                                                onChange={(e) => handleOutputChange(index, 'selectedTeaWeight', e.target.value)}
+                                                                onWheel={(e) => e.target.blur()}
+                                                                required
+                                                                className={inputStyles}
+                                                            />
                                                         </div>
                                                         <div>
-                                                            <label className={labelStyles}>Roller (Points)</label>
-                                                            <input type="number" min="0" value={dryer.rollerPoints} onChange={(e) => handleDryerOutputChange(index, 'rollerPoints', e.target.value)} onWheel={(e) => e.target.blur()} className={inputStyles} placeholder="Optional" />
+                                                            <label className={labelStyles}>Made Tea (KG)</label>
+                                                            <input type="number" step="0.001" min="0" value={out.madeTeaWeight} onChange={(e) => handleOutputChange(index, 'madeTeaWeight', e.target.value)} onWheel={(e) => e.target.blur()} required className={inputStyles} />
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="pt-4 border-t border-gray-100 dark:border-zinc-800">
+                                                        <h4 className="text-xs font-bold text-orange-500 uppercase mb-3 flex items-center gap-1"><Zap size={14} /> Dryer Readings</h4>
+                                                        <div className="space-y-4">
+                                                            <div>
+                                                                <label className={labelStyles}>Select Dryer</label>
+                                                                <select value={out.dryerName} onChange={(e) => handleOutputChange(index, 'dryerName', e.target.value)} required className={inputStyles}>
+                                                                    <option value="">Choose...</option>
+                                                                    <option value="Dryer 1">Dryer 1</option>
+                                                                    <option value="Dryer 2">Dryer 2</option>
+                                                                </select>
+                                                            </div>
+                                                            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                                                                <div>
+                                                                    <label className={labelStyles}>Start Reading</label>
+                                                                    <input type="number" min="0" value={out.meterStart} onChange={(e) => handleOutputChange(index, 'meterStart', e.target.value)} onWheel={(e) => e.target.blur()} required className={inputStyles} />
+                                                                </div>
+                                                                <div>
+                                                                    <label className={labelStyles}>End Reading</label>
+                                                                    <input type="number" min="0" value={out.meterEnd} onChange={(e) => handleOutputChange(index, 'meterEnd', e.target.value)} onWheel={(e) => e.target.blur()} required className={inputStyles} />
+                                                                </div>
+                                                                <div className="col-span-2 md:col-span-1">
+                                                                    <label className={labelStyles}>Roller (Points)</label>
+                                                                    <input type="number" min="0" value={out.rollerPoints} onChange={(e) => handleOutputChange(index, 'rollerPoints', e.target.value)} onWheel={(e) => e.target.blur()} className={inputStyles} placeholder="Optional" />
+                                                                </div>
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -961,12 +561,12 @@ export default function GreenLeafForm() {
                         </div>
                     </div>
                 )}
-                
+
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-                    
+
                     {/* --- LEFT SIDE: FORM --- */}
                     <div className="lg:col-span-8 space-y-6">
-                        
+
                         <div className="bg-white dark:bg-zinc-900 p-5 rounded-2xl shadow-sm border border-gray-200 dark:border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                             <div className="flex-1 flex items-center gap-4">
                                 <div className="w-full sm:w-1/2">
@@ -980,12 +580,12 @@ export default function GreenLeafForm() {
                         </div>
 
                         <form onSubmit={handleAddToList} className="space-y-6">
-                            
+
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 {/* 1. GREEN LEAF */}
                                 <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-2xl shadow-sm overflow-hidden h-fit">
                                     <div className="bg-green-50/50 dark:bg-green-500/5 p-4 border-b border-gray-100 dark:border-zinc-800 flex items-center gap-3">
-                                        <div className="p-2 bg-green-100 dark:bg-green-500/20 rounded-lg text-green-700 dark:text-green-400"><Leaf size={18}/></div>
+                                        <div className="p-2 bg-green-100 dark:bg-green-500/20 rounded-lg text-green-700 dark:text-green-400"><Leaf size={18} /></div>
                                         <h3 className="font-bold text-gray-800 dark:text-gray-200">Green Leaf Details</h3>
                                     </div>
                                     <div className="p-5 space-y-5">
@@ -1009,7 +609,7 @@ export default function GreenLeafForm() {
                                 {/* 2. DRYER SCHEDULE */}
                                 <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-2xl shadow-sm overflow-hidden h-fit">
                                     <div className="bg-orange-50/50 dark:bg-orange-500/5 p-4 border-b border-gray-100 dark:border-zinc-800 flex items-center gap-3">
-                                        <div className="p-2 bg-orange-100 dark:bg-orange-500/20 rounded-lg text-orange-600 dark:text-orange-400"><CalendarClock size={18}/></div>
+                                        <div className="p-2 bg-orange-100 dark:bg-orange-500/20 rounded-lg text-orange-600 dark:text-orange-400"><CalendarClock size={18} /></div>
                                         <h3 className="font-bold text-gray-800 dark:text-gray-200">Dryer Schedule</h3>
                                     </div>
                                     <div className="p-5">
@@ -1023,7 +623,7 @@ export default function GreenLeafForm() {
                             {/* 3. LABOUR DETAILS */}
                             <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-2xl shadow-sm overflow-hidden">
                                 <div className="bg-blue-50/50 dark:bg-blue-500/5 p-4 border-b border-gray-100 dark:border-zinc-800 flex items-center gap-3">
-                                    <div className="p-2 bg-blue-100 dark:bg-blue-500/20 rounded-lg text-blue-700 dark:text-blue-400"><Users size={18}/></div>
+                                    <div className="p-2 bg-blue-100 dark:bg-blue-500/20 rounded-lg text-blue-700 dark:text-blue-400"><Users size={18} /></div>
                                     <h3 className="font-bold text-gray-800 dark:text-gray-200">Labour & Workforce</h3>
                                 </div>
                                 <div className="p-6">
@@ -1044,18 +644,18 @@ export default function GreenLeafForm() {
                                         </div>
                                         <div>
                                             <label className={labelStyles}>Rolling Workers</label>
-                                            <input 
-                                                type="number" 
-                                                name="rollingWorkerCount" 
+                                            <input
+                                                type="number"
+                                                name="rollingWorkerCount"
                                                 step="any"
-                                                min="0" 
-                                                value={formData.rollingWorkerCount} 
-                                                onChange={handleInputChange} 
+                                                min="0"
+                                                value={formData.rollingWorkerCount}
+                                                onChange={handleInputChange}
                                                 disabled={formData.rollingType !== 'Hand Rolling'}
                                                 placeholder={formData.rollingType === 'Hand Rolling' ? "Enter count" : "N/A"}
                                                 required={formData.rollingType === 'Hand Rolling'}
                                                 onKeyDown={(e) => { if (e.key === '-') e.preventDefault(); }}
-                                                className={inputStyles} 
+                                                className={inputStyles}
                                             />
                                         </div>
                                     </div>
@@ -1071,7 +671,7 @@ export default function GreenLeafForm() {
                     {/* --- RIGHT SIDE: PENDING QUEUE --- */}
                     <div className="lg:col-span-4 flex flex-col h-full max-h-[85vh]">
                         <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-sm border border-gray-200 dark:border-zinc-800 flex-1 flex flex-col overflow-hidden sticky top-24 transition-colors duration-300">
-                            
+
                             <div className="bg-gray-50/80 dark:bg-zinc-950/50 p-5 border-b border-gray-200 dark:border-zinc-800 flex items-center justify-between transition-colors">
                                 <div className="flex items-center gap-3">
                                     <div className="p-2 bg-white dark:bg-zinc-800 shadow-sm border border-gray-100 dark:border-zinc-700 rounded-lg text-gray-700 dark:text-gray-300">
@@ -1097,8 +697,8 @@ export default function GreenLeafForm() {
                                     <div className="space-y-3">
                                         {pendingRecords.map((item, index) => (
                                             <div key={index} className="bg-white dark:bg-zinc-900 p-4 border border-gray-200 dark:border-zinc-800 rounded-2xl shadow-sm relative group hover:border-green-300 dark:hover:border-green-700/50 transition-colors">
-                                                
-                                                <button 
+
+                                                <button
                                                     onClick={() => handleRemoveFromList(index)}
                                                     className="absolute top-3 right-3 text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 bg-white dark:bg-zinc-900 p-1.5 rounded-md shadow-sm border border-gray-100 dark:border-zinc-700 transition-colors"
                                                     title="Remove"
@@ -1116,7 +716,7 @@ export default function GreenLeafForm() {
                                                             </div>
                                                         </div>
                                                     </div>
-                                                    
+
                                                     <div className="grid grid-cols-2 gap-2 text-xs font-medium text-gray-600 dark:text-gray-400">
                                                         <div className="bg-gray-50 dark:bg-zinc-950 p-2.5 rounded-xl border border-gray-100 dark:border-zinc-800 transition-colors">
                                                             <span className="block text-[10px] uppercase text-gray-400 font-bold mb-1">Leaf</span>
@@ -1127,7 +727,7 @@ export default function GreenLeafForm() {
                                                         </div>
                                                     </div>
                                                     <div className="flex justify-between items-center pt-2 border-t border-gray-100 dark:border-zinc-800">
-                                                        <span className="text-[10px] uppercase text-gray-400 font-bold flex items-center gap-1"><CalendarClock size={10}/> Dryer Date</span>
+                                                        <span className="text-[10px] uppercase text-gray-400 font-bold flex items-center gap-1"><CalendarClock size={10} /> Dryer Date</span>
                                                         <span className="font-bold text-orange-600 dark:text-orange-400 text-xs">{item.expectedDryerDate}</span>
                                                     </div>
                                                 </div>
@@ -1138,14 +738,13 @@ export default function GreenLeafForm() {
                             </div>
 
                             <div className="p-5 border-t border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 space-y-3 transition-colors">
-                                <button 
+                                <button
                                     onClick={handleSaveAll}
                                     disabled={isSavingAll || pendingRecords.length === 0}
-                                    className={`w-full py-4 rounded-2xl text-white font-black flex justify-center items-center gap-2 transition-all ${
-                                        isSavingAll || pendingRecords.length === 0 
-                                        ? 'bg-gray-300 dark:bg-zinc-800 text-gray-500 dark:text-zinc-500 cursor-not-allowed' 
-                                        : 'bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-600/20 hover:-translate-y-0.5'
-                                    }`}
+                                    className={`w-full py-4 rounded-2xl text-white font-black flex justify-center items-center gap-2 transition-all ${isSavingAll || pendingRecords.length === 0
+                                            ? 'bg-gray-300 dark:bg-zinc-800 text-gray-500 dark:text-zinc-500 cursor-not-allowed'
+                                            : 'bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-600/20 hover:-translate-y-0.5'
+                                        }`}
                                 >
                                     <Save size={18} /> {isSavingAll ? "Saving..." : `Save to Database (${pendingRecords.length})`}
                                 </button>

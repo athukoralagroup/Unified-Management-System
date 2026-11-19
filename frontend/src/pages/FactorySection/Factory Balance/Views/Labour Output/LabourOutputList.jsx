@@ -24,14 +24,14 @@ import {
 } from "@/components/ui/alert-dialog";
 
 const LabourOutputTable = () => {
-    const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
+    const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
     const navigate = useNavigate();
     const location = useLocation();
     
     // --- ROLE BASED ACCESS ---
     const userRole = localStorage.getItem("userRole") || localStorage.getItem("role") || "";
     const isViewer = userRole.toLowerCase() === "viewer" || userRole.toLowerCase() === "view";
-    const isAdmin = userRole === "Admin";
+    const isAdmin = userRole === "Admin" || userRole === "Developer";
 
     // Date Helpers
     const today = new Date();
@@ -85,10 +85,10 @@ const LabourOutputTable = () => {
     const fetchData = useCallback(async () => {
         setIsLoading(true);
         try {
-            const token = localStorage.getItem("token"); // 👈 Token එක ලබා ගැනීම
+            const token = localStorage.getItem("token"); 
             const response = await fetch(`${BACKEND_URL}/api/labour-output`, {
                 headers: { 
-                    'Authorization': `Bearer ${token}` // 👈 Token එක යැවීම
+                    'Authorization': `Bearer ${token}` 
                 }
             });
             if (!response.ok) throw new Error("Failed to fetch data");
@@ -195,12 +195,12 @@ const LabourOutputTable = () => {
         if (!recordToDelete) return;
         const toastId = toast.loading("Deleting records...");
         try {
-            const token = localStorage.getItem("token"); // 👈 Token එක ලබා ගැනීම
+            const token = localStorage.getItem("token"); 
             const response = await fetch(`${BACKEND_URL}/api/labour-output/date/${recordToDelete.date}`, {
                 method: "DELETE",
                 headers: { 
                     "Content-Type": "application/json",
-                    "Authorization": `Bearer ${token}` // 👈 Token එක යැවීම
+                    "Authorization": `Bearer ${token}`
                 }
             });
             if (!response.ok) throw new Error("Failed to delete the record");
@@ -301,7 +301,7 @@ const LabourOutputTable = () => {
 
                 <div className="flex flex-wrap items-center gap-2">
                     <button onClick={fetchData} disabled={isLoading} className="px-4 py-2 h-[42px] bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-md text-sm font-semibold flex items-center gap-2 shadow-sm transition-all">
-                        <RefreshCcw size={18} className={isLoading ? "animate-spin" : ""} /> Refresh
+                        <RefreshCcw size={18} className={isLoading ? "animate-spin" : ""} /> 
                     </button>
                     <button onClick={exportToExcel} disabled={filteredGroups.length === 0} className="px-4 py-2 h-[42px] bg-white dark:bg-gray-800 text-[#1B6A31] dark:text-green-400 border border-[#1B6A31] dark:border-green-500 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-md text-sm font-semibold flex items-center gap-2 shadow-sm transition-all disabled:opacity-50">
                         <FileSpreadsheet size={18} /> Export Excel

@@ -1,44 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import { Search, FileSpreadsheet, RefreshCw, AlertCircle, FileText, Trash2 } from 'lucide-react';
+import { Search, FileSpreadsheet, RefreshCw, AlertCircle, FileText, Trash2, CalendarDays } from 'lucide-react';
 import toast from 'react-hot-toast';
 import PDFDownloader from '@/components/PDFDownloader'; 
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 
-// Base structure (මෙයට අමතරව එන ඒවා ඉබේම table එකට එකතු වේ)
+// Base structure (Main categories ya list madhye ahet, te kadhich hide honar nahit)
 const baseTableStructure = [
-    { 
-        id: 'athukorala', title: 'ATHUKORALA', 
-        columns: [{ size: '400g', key: 'athukorala_400g' }, { size: '200g', key: 'athukorala_200g' }, { size: '100g', key: 'athukorala_100g' }] 
-    },
-    { 
-        id: 'bopfSp', title: 'BOPF SP.', 
-        columns: [{ size: '400g', key: 'bopfSp_400g' }, { size: '200g', key: 'bopfSp_200g' }] 
-    },
-    { 
-        id: 'bopfPremium', title: 'BOPF PRE.', 
-        columns: [{ size: '400g', key: 'bopfPremium_400g' }, { size: '200g', key: 'bopfPremium_200g' }] 
-    },
-    { 
-        id: 'tb', title: 'T/B', 
-        columns: [{ size: '100', key: 'tb_100' }, { size: '25', key: 'tb_25' }] 
-    },
-    { 
-        id: 'pitigala', title: 'PITIGALA TEA', 
-        columns: [{ size: '400g', key: 'pitigala_400g' }, { size: '200g', key: 'pitigala_200g' }] 
-    },
-    { 
-        id: 'gt', title: 'G/T', 
-        columns: [{ size: '200g', key: 'gt_200g' }, { size: 'T/B 25', key: 'gttb25_T/B 25' }] 
-    },
-    { 
-        id: 'others', title: 'OTHER', 
-        columns: [{ size: 'DUST', key: 'others_DUST (KG)' }, { size: 'DUST 1', key: 'others_DUST 1 (KG)' }, { size: 'BOPF', key: 'others_BOPF (KG)' }] 
-    }
+    { id: 'athukorala', title: 'ATHUKORALA', columns: [{ size: '400g' }, { size: '200g' }, { size: '100g' }] },
+    { id: 'bopfSp', title: 'BOPF SP.', columns: [{ size: '400g' }, { size: '200g' }] },
+    { id: 'bopfPremium', title: 'BOPF PRE.', columns: [{ size: '400g' }, { size: '200g' }] },
+    { id: 'tb', title: 'T/B', columns: [{ size: '100' }, { size: '25' }] },
+    { id: 'pitigala', title: 'PITIGALA TEA', columns: [{ size: '400g' }, { size: '200g' }] },
+    { id: 'gt', title: 'G/T', columns: [{ size: '200g' }, { size: 'T/B 25' }] },
+    { id: 'others', title: 'OTHER', columns: [{ size: 'DUST' }, { size: 'DUST 1' }, { size: 'BOPF' }] }
 ];
 
 export default function FreeIssueSummary() {
-    const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
+    const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
 
     const [month, setMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
     const [fromDate, setFromDate] = useState('');
@@ -51,19 +30,56 @@ export default function FreeIssueSummary() {
     const [datesOfMonth, setDatesOfMonth] = useState([]);
     const [dailyDataMap, setDailyDataMap] = useState({});
 
-    // Dynamic columns states (අලුත් items ආවොත් ඒවා මෙතැනට එකතු වේ)
-    const [dynamicTableStructure, setDynamicTableStructure] = useState(baseTableStructure);
+    // Dynamic columns states
+    const [dynamicTableStructure, setDynamicTableStructure] = useState([]);
     const [flatColumns, setFlatColumns] = useState([]);
+
+    // 💡 Auto-Correction Key Generator
+    const generateKey = (catId, catTitle, size) => {
+        let cleanId = (catId || '').toLowerCase().trim();
+        let cleanTitle = (catTitle || '').toLowerCase().trim();
+        let cleanSize = (size || '').trim();
+
+        if (!cleanId && cleanTitle) {
+            cleanId = cleanTitle.replace(/\s+/g, '-'); 
+        }
+
+        let finalId = cleanId || 'unknown';
+        let finalSize = cleanSize || catTitle || '-';
+
+        if (cleanId === 'g/t' || cleanTitle === 'g/t' || cleanId === 'gt') finalId = 'gt';
+        else if (cleanId === 'other grades' || cleanTitle === 'other grades' || cleanId === 'others') finalId = 'others';
+        else if (cleanId === 'bopf sp' || cleanId === 'bopf sp.' || cleanId === 'bopfsp') finalId = 'bopfSp';
+        else if (cleanId === 'bopf premium' || cleanId === 'bopfpremium') finalId = 'bopfPremium';
+        else if (cleanId === 't/b' || cleanId === 'tb') finalId = 'tb';
+        else if (cleanId === 'pitigala tea' || cleanId === 'pitigala') finalId = 'pitigala';
+        else if (cleanId === 'athukorala') finalId = 'athukorala';
+        else {
+             finalId = cleanTitle.replace(/[^a-z0-9]/g, ''); 
+        }
+
+        if (finalSize.toLowerCase() === 'bopf (kg)' || finalSize.toLowerCase() === 'kg' || finalSize.toLowerCase() === 'bopf') finalSize = 'BOPF';
+        if (finalSize.toLowerCase() === 'dust (kg)' || finalSize.toLowerCase() === 'dust') finalSize = 'DUST';
+        if (finalSize.toLowerCase() === 'dust 1 (kg)' || finalSize.toLowerCase() === 'dust 1') finalSize = 'DUST 1';
+        if (finalSize.toLowerCase() === 't/b 25' || finalSize.toLowerCase() === '25 bag') finalSize = 'T/B 25';
+
+        return { 
+            id: finalId, 
+            title: catTitle || cleanId.toUpperCase(),
+            size: finalSize, 
+            key: `${finalId}_${finalSize}` 
+        };
+    };
 
     const fetchFreeIssues = async () => {
         if (!month) return;
         setIsLoading(true);
 
         try {
-            const token = localStorage.getItem("token"); // 👈 Token එක ලබා ගැනීම
+            const token = localStorage.getItem("token");
             const response = await fetch(`${BACKEND_URL}/api/issue-summary?month=${month}`, {
                 headers: {
-                    'Authorization': `Bearer ${token}` // 👈 2. Headers වලට Token එක එකතු කිරීම
+                    'Authorization': `Bearer ${token}`
                 }
             });
             const result = await response.json();
@@ -78,7 +94,7 @@ export default function FreeIssueSummary() {
             toast.error(error.message || "Error generating free issues report.");
             setDatesOfMonth([]);
             setDailyDataMap({});
-            setDynamicTableStructure(baseTableStructure);
+            setDynamicTableStructure([]);
             setFlatColumns([]);
         } finally {
             setIsLoading(false);
@@ -90,38 +106,34 @@ export default function FreeIssueSummary() {
         const dailyMap = {};
         const activeDates = new Set();
         
-        // Deep copy of base structure to append new custom items
-        const currentStructure = JSON.parse(JSON.stringify(baseTableStructure));
+        const dynamicCategoriesMap = {};
+        const dynamicBaseSizesMap = {};
+        const baseCategoryIds = baseTableStructure.map(c => c.id);
 
         freeRecords.forEach(record => {
             const date = record.date;
+            if (!dailyMap[date]) dailyMap[date] = {};
             let hasData = false;
             
-            if (!dailyMap[date]) dailyMap[date] = {};
-            
             record.items?.forEach(item => {
-                const key = `${item.categoryId}_${item.size}`;
+                const { id, title, size, key } = generateKey(item.categoryId, item.categoryTitle, item.size);
                 const outValue = Number(item.out) || 0;
 
                 if (outValue > 0) {
                     dailyMap[date][key] = (dailyMap[date][key] || 0) + outValue;
                     hasData = true;
 
-                    // --- DYNAMICALLY ADD NEW CATEGORY OR SIZE ---
-                    let catIndex = currentStructure.findIndex(c => c.id === item.categoryId);
-                    
-                    if (catIndex === -1) {
-                        // Category එක නැත්නම් අලුතින් එකතු කරන්න
-                        currentStructure.push({
-                            id: item.categoryId,
-                            title: item.categoryTitle || item.categoryId.toUpperCase(),
-                            columns: [{ size: item.size, key: key }]
-                        });
+                    if (!baseCategoryIds.includes(id)) {
+                        if (!dynamicCategoriesMap[id]) {
+                            dynamicCategoriesMap[id] = { id, title, sizes: new Set() };
+                        }
+                        dynamicCategoriesMap[id].sizes.add(size);
                     } else {
-                        // Category එක තියෙනවා, Size එක තියෙනවද බලන්න
-                        const colExists = currentStructure[catIndex].columns.some(c => c.size === item.size);
-                        if (!colExists) {
-                            currentStructure[catIndex].columns.push({ size: item.size, key: key });
+                        const baseCat = baseTableStructure.find(c => c.id === id);
+                        const sizeExists = baseCat.columns.some(c => c.size.toLowerCase() === size.toLowerCase());
+                        if (!sizeExists) {
+                            if (!dynamicBaseSizesMap[id]) dynamicBaseSizesMap[id] = new Set();
+                            dynamicBaseSizesMap[id].add(size);
                         }
                     }
                 }
@@ -130,21 +142,68 @@ export default function FreeIssueSummary() {
             if (hasData) activeDates.add(date);
         });
 
-        // Sort Dates Descending
         const sortedDates = Array.from(activeDates)
             .filter(d => d.startsWith(month))
-            .sort((a, b) => new Date(b) - new Date(a));
+            .sort((a, b) => new Date(a) - new Date(b));
 
-        // Generate flat columns from the dynamically updated structure
-        const newFlatColumns = [];
-        currentStructure.forEach(cat => {
-            cat.columns.forEach(col => {
-                newFlatColumns.push({ catId: cat.id, size: col.size, key: col.key });
+        // 💡 1. Build Full Structure
+        const currentStructure = baseTableStructure.map(cat => {
+            const newCols = cat.columns.map(c => {
+                const { key } = generateKey(cat.id, cat.title, c.size);
+                return { size: c.size, key };
             });
+            if (dynamicBaseSizesMap[cat.id]) {
+                dynamicBaseSizesMap[cat.id].forEach(sz => {
+                    const { key } = generateKey(cat.id, cat.title, sz);
+                    newCols.push({ size: sz, key });
+                });
+            }
+            return { ...cat, columns: newCols };
         });
 
-        setDynamicTableStructure(currentStructure);
-        setFlatColumns(newFlatColumns);
+        Object.values(dynamicCategoriesMap).forEach(cat => {
+            const cleanTitle = cat.title.replace(/[-_]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            const newCols = Array.from(cat.sizes).map(sz => {
+                const { key } = generateKey(cat.id, cat.title, sz);
+                return { size: sz, key };
+            });
+            currentStructure.push({ id: cat.id, title: cleanTitle, columns: newCols });
+        });
+
+        // 💡 2. Filter empty custom categories (Keep base columns always visible)
+        const filteredStructure = [];
+        const flatCols = [];
+
+        currentStructure.forEach(cat => {
+            const isBaseCat = baseCategoryIds.includes(cat.id);
+            const activeCols = [];
+
+            cat.columns.forEach(col => {
+                // Check if it's an original default size of a base category
+                const isBaseSize = isBaseCat && baseTableStructure.find(c => c.id === cat.id).columns.some(c => c.size === col.size);
+                
+                // Check if column has any data for the month
+                let colHasData = false;
+                sortedDates.forEach(date => {
+                    if (dailyMap[date] && dailyMap[date][col.key] > 0) {
+                        colHasData = true;
+                    }
+                });
+
+                // Keep column if it's a main base column OR if it actually has data
+                if (isBaseSize || colHasData) {
+                    activeCols.push(col);
+                    flatCols.push({ catId: cat.id, size: col.size, key: col.key });
+                }
+            });
+
+            if (activeCols.length > 0) {
+                filteredStructure.push({ ...cat, columns: activeCols });
+            }
+        });
+
+        setDynamicTableStructure(filteredStructure);
+        setFlatColumns(flatCols);
         setDatesOfMonth(sortedDates);
         setDailyDataMap(dailyMap);
     };
@@ -154,7 +213,6 @@ export default function FreeIssueSummary() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [month]);
 
-    // --- FILTERING & DYNAMIC TOTALS ---
     const filteredDates = datesOfMonth.filter(date => {
         if (searchQuery && !date.replace(/-/g, '.').includes(searchQuery)) return false;
 
@@ -183,7 +241,6 @@ export default function FreeIssueSummary() {
 
     const currentTotals = calculateTotals();
 
-    // --- UTILS ---
     const clearFilters = () => {
         setFromDate('');
         setToDate('');
@@ -304,36 +361,74 @@ export default function FreeIssueSummary() {
                 });
             });
 
+            const startDataRow = 4;
+            let currentRow = startDataRow;
+
             filteredDates.forEach(date => {
-                const rowData = [date];
-                flatColumns.forEach(col => {
-                    const val = dailyDataMap[date]?.[col.key];
-                    rowData.push(val && val > 0 ? Number(val) : '-');
-                });
+                const dataRow = worksheet.addRow([date]); 
                 
-                const dataRow = worksheet.addRow(rowData);
-                dataRow.eachCell((cell, cIdx) => {
+                const dateCell = dataRow.getCell(1);
+                dateCell.alignment = { horizontal: 'center', vertical: 'middle' };
+                dateCell.border = { top: { style: 'thin', color: { argb: 'FFDCEBDC' } }, bottom: { style: 'thin', color: { argb: 'FFDCEBDC' } }, left: { style: 'thin', color: { argb: 'FFDCEBDC' } }, right: { style: 'thin', color: { argb: 'FFDCEBDC' } } };
+                dateCell.font = { bold: true, color: { argb: 'FF111827' } };
+
+                flatColumns.forEach((col, idx) => {
+                    const val = dailyDataMap[date]?.[col.key];
+                    const cell = dataRow.getCell(idx + 2); 
+                    
+                    if (val && val > 0) {
+                        cell.value = Number(val);
+                    } else {
+                        cell.value = ''; 
+                    }
+                    
                     cell.alignment = { horizontal: 'center', vertical: 'middle' };
                     cell.border = { top: { style: 'thin', color: { argb: 'FFDCEBDC' } }, bottom: { style: 'thin', color: { argb: 'FFDCEBDC' } }, left: { style: 'thin', color: { argb: 'FFDCEBDC' } }, right: { style: 'thin', color: { argb: 'FFDCEBDC' } } };
-                    if(cIdx === 1) cell.font = { bold: true, color: { argb: 'FF111827' } };
-                    else cell.font = { color: { argb: 'FFEF4444' } }; 
+                    cell.font = { color: { argb: 'FFEF4444' } }; 
                 });
+                
+                currentRow++;
             });
 
             worksheet.addRow([]);
+            currentRow++;
 
-            const totalsData = ["TOTAL"];
-            flatColumns.forEach(col => {
-                const val = currentTotals[col.key];
-                totalsData.push(val && val > 0 ? Number(val) : '-');
-            });
-            const ftRow = worksheet.addRow(totalsData);
-            ftRow.eachCell((cell, cIdx) => {
+            const numToCol = (n) => {
+                let ordA = 'A'.charCodeAt(0);
+                let ordZ = 'Z'.charCodeAt(0);
+                let len = ordZ - ordA + 1;
+                let s = "";
+                while(n >= 0) {
+                    s = String.fromCharCode(n % len + ordA) + s;
+                    n = Math.floor(n / len) - 1;
+                }
+                return s;
+            };
+
+            const endDataRow = startDataRow + filteredDates.length - 1;
+            const ftRow = worksheet.addRow(['TOTAL']);
+            
+            const titleTotalCell = ftRow.getCell(1);
+            titleTotalCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF4F5F5' } };
+            titleTotalCell.alignment = { horizontal: 'center', vertical: 'middle' };
+            titleTotalCell.border = { top: { style: 'thin', color: { argb: 'FFDCEBDC' } }, bottom: { style: 'thin', color: { argb: 'FFDCEBDC' } }, right: { style: 'thin', color: { argb: 'FFDCEBDC' } }, left: { style: 'thin', color: { argb: 'FFDCEBDC' } } };
+            titleTotalCell.font = { bold: true, color: { argb: 'FF111827' } };
+
+            flatColumns.forEach((col, idx) => {
+                const cellIndex = idx + 2;
+                const cell = ftRow.getCell(cellIndex);
+                const colLetter = numToCol(cellIndex - 1); 
+                
+                if (filteredDates.length > 0) {
+                    cell.value = { formula: `SUM(${colLetter}${startDataRow}:${colLetter}${endDataRow})` };
+                } else {
+                    cell.value = 0;
+                }
+
                 cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF4F5F5' } };
                 cell.alignment = { horizontal: 'center', vertical: 'middle' };
                 cell.border = { top: { style: 'thin', color: { argb: 'FFDCEBDC' } }, bottom: { style: 'thin', color: { argb: 'FFDCEBDC' } }, right: { style: 'thin', color: { argb: 'FFDCEBDC' } }, left: { style: 'thin', color: { argb: 'FFDCEBDC' } } };
-                if(cIdx === 1) cell.font = { bold: true, color: { argb: 'FF111827' } };
-                else cell.font = { bold: true, color: { argb: 'FFDC2626' } }; 
+                cell.font = { bold: true, color: { argb: 'FFDC2626' } }; 
             });
 
             worksheet.getColumn(1).width = 15;

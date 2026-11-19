@@ -1,6 +1,6 @@
 import React from 'react';
 import { FileDown } from "lucide-react";
-import { FaWhatsapp } from "react-icons/fa"; // <-- WhatsApp icon එකට
+import { FaWhatsapp } from "react-icons/fa"; 
 import toast from 'react-hot-toast';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -18,10 +18,15 @@ export default function PDFDownloader({
     userName,
     userRole,
     autoTableOptions = {},
-    isWhatsApp = false // <-- NEW PROP: WhatsApp Share කිරීම සඳහා
+    isWhatsApp = false,
+    customButton = null,       
+    onActionStart = () => {}   
 }) {
 
-    const handleAction = async () => {
+    const handleAction = async (e) => {
+        if (e && e.preventDefault) e.preventDefault();
+        onActionStart(); // Trigger action start (e.g. close dropdown)
+
         if (!data || data.length === 0) {
             toast.error("No data available to process.");
             return;
@@ -32,7 +37,9 @@ export default function PDFDownloader({
         const doc = new jsPDF(orientation);
 
         try {
-            // 1. Load Logo (Optional)
+            // ===============================================================
+            // 💡 1. Load Logo
+            // ===============================================================
             try {
                 const res = await fetch("/logo.png");
                 if (res.ok) {
@@ -42,24 +49,41 @@ export default function PDFDownloader({
                         reader.onloadend = () => resolve(reader.result);
                         reader.readAsDataURL(blob);
                     });
-                    doc.addImage(dataUrl, "PNG", 14, 10, 25, 25, "", "FAST");
+                    
+                    // Logo Image (රූපයට ගැළපෙන පරිදි ප්‍රමාණය වෙනස් කර ඇත)
+                    doc.addImage(dataUrl, "PNG", 14, 10, 24, 24, "", "FAST");
                 }
             } catch (err) {
                 console.warn("Logo not found or couldn't be loaded.");
             }
 
-            // 2. Add Titles
-            doc.setFontSize(16);
-            doc.setTextColor(27, 106, 49);
-            doc.text(title, 45, 25);
+            // ===============================================================
+            // 💡 2. Add Company Name, Title & Subtitle (රූපයේ පරිදි පෙළගස්වා ඇත)
+            // ===============================================================
+            
+            // Company Name
+            doc.setFontSize(18);
+            doc.setTextColor(27, 106, 49); // Theme Green (#1B6A31)
+            doc.setFont(undefined, 'bold');
+            doc.text("ATHUKORALA GROUP (PVT) LTD", 42, 18);
 
+            // Document Title (e.g. HYDRO METERS CHART)
+            doc.setFontSize(14);
+            doc.setTextColor(40, 40, 40); // Dark/Black
+            doc.setFont(undefined, 'bold');
+            doc.text(title, 42, 26);
+
+            // Subtitle (e.g. Date: 2026-08-28)
             if (subtitle) {
-                doc.setFontSize(10);
-                doc.setTextColor(100);
-                doc.text(subtitle, 45, 30);
+                doc.setFontSize(11);
+                doc.setTextColor(80, 80, 80); // Gray
+                doc.setFont(undefined, 'normal');
+                doc.text(subtitle, 42, 33);
             }
 
-            // --- Generate Current Date & Time ---
+            // ===============================================================
+            // 💡 3. Generate Current Date & Time (Meta Info)
+            // ===============================================================
             const now = new Date();
             const year = now.getFullYear();
             const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -70,13 +94,16 @@ export default function PDFDownloader({
             hours = hours % 12 || 12;
             const generatedDateTime = `${year}/${month}/${day} ${hours}.${minutes}${ampm}`;
 
-            doc.setFontSize(10);
-            doc.setTextColor(150);
+            doc.setFontSize(8);
+            doc.setTextColor(150, 150, 150);
+            
+            // 💡 මකා දැමී තිබුණු pageHeight එක මෙතැනට නැවත එකතු කර ඇත
             const pageWidth = doc.internal.pageSize.getWidth();
-            const pageHeight = doc.internal.pageSize.getHeight();
+            const pageHeight = doc.internal.pageSize.getHeight(); 
 
-            doc.text(`Doc Ref: ${uniqueCode}`, pageWidth - 14, 12, { align: 'right' });
-            doc.text(`Generated: ${generatedDateTime}`, pageWidth - 14, 17, { align: 'right' });
+            // දකුණු පස ඉහළ කෙළවරේ Doc Ref සහ Date
+            doc.text(`Doc Ref: ${uniqueCode}`, pageWidth - 14, 20, { align: 'right' });
+            doc.text(`Generated: ${generatedDateTime}`, pageWidth - 14, 25, { align: 'right' });
 
             // --- Advanced Sorting ---
             let totalRow = null;
@@ -120,16 +147,16 @@ export default function PDFDownloader({
 
             // 3. Generate Table
             autoTable(doc, {
-                startY: 40,
+                startY: 45,
                 head: finalHeaders,
                 body: processedBody,
                 theme: 'grid',
-                headStyles: { 
-                    fillColor: [35, 164, 74], 
-                    textColor: 255,              
-                    fontSize: 9, 
-                    halign: 'center',         
-                    valign: 'middle'           
+                headStyles: {
+                    fillColor: [35, 164, 74],
+                    textColor: 255,
+                    fontSize: 9,
+                    halign: 'center',
+                    valign: 'middle'
                 },
                 bodyStyles: { fontSize: 8, halign: 'center' },
                 columnStyles: { 0: { fontStyle: 'bold', halign: 'left' } },
@@ -185,7 +212,7 @@ export default function PDFDownloader({
             doc.text("Generated By:", 14, finalY);
             doc.setTextColor(30, 30, 30);
             doc.setFont(undefined, 'bold');
-            doc.text(`${finalUserName} (${finalUserRole})`, 14, finalY + 6);
+            doc.text(`${finalUserName}`, 14, finalY + 6);
             doc.setFont(undefined, 'normal');
 
             doc.setTextColor(100, 100, 100);
@@ -231,18 +258,28 @@ export default function PDFDownloader({
         }
     };
 
-    // Render different buttons based on isWhatsApp prop
+    // Render Custom Button if provided
+    if (customButton) {
+        return React.cloneElement(customButton, {
+            onClick: (e) => {
+                if (customButton.props.onClick) customButton.props.onClick(e);
+                handleAction(e);
+            },
+            disabled: disabled || customButton.props.disabled
+        });
+    }
+
     if (isWhatsApp) {
         return (
             <button onClick={handleAction} disabled={disabled} className={`px-4 py-2.5 bg-green-500 hover:bg-green-600 text-white rounded-lg text-sm font-bold flex items-center gap-2 shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed ${className}`}>
-                <FaWhatsapp size={18} /> Share on WhatsApp
+                <FaWhatsapp size={18} /> Share WhatsApp
             </button>
         );
     }
 
     return (
         <button onClick={handleAction} disabled={disabled} className={`px-4 py-2.5 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800/50 rounded-lg text-sm font-bold flex items-center gap-2 shadow-sm transition-all hover:bg-blue-100 dark:hover:bg-blue-900/50 disabled:opacity-50 disabled:cursor-not-allowed ${className}`}>
-            <FileDown size={18} /> Download PDF
+            <FileDown size={18} /><span className="font-bold text-xs sm:text-sm hidden sm:inline"> Download PDF </span>
         </button>
     );
 }

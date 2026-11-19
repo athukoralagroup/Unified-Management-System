@@ -8,15 +8,12 @@ import {
   Truck,
   Store,
   FileText,
-  Tag,
   TrendingDown
 } from "lucide-react";
 import { MdOutlineDeleteOutline, MdOutlineEdit } from "react-icons/md";
 import { useLocation, useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import PDFDownloader from "@/components/PDFDownloader";
-
-// අත්‍යවශ්‍ය Dialog Components (UI Folder එකෙන්)
 import {
   AlertDialog,
   AlertDialogAction,
@@ -52,6 +49,8 @@ export default function DispatchRecordsView() {
   });
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+
+  const [filterDispatchType, setFilterDispatchType] = useState("All");
 
   useEffect(() => {
     if (isDarkMode) {
@@ -102,12 +101,10 @@ export default function DispatchRecordsView() {
 
       const data = await response.json();
       
-      // Filter out records that have NO dispatch and NO local sale (keep only relevant rows)
       const dispatchRecords = (data.records || []).filter(
           r => (r.dispatch > 0 || r.localSaleAndGratis > 0 || r.returnAmount > 0)
       );
 
-      // Sort descending (newest first)
       setRecords(dispatchRecords.sort((a, b) => new Date(b.date) - new Date(a.date)));
     } catch (error) {
       console.error("Fetch Error:", error);
@@ -130,7 +127,6 @@ export default function DispatchRecordsView() {
     if (!recordToDelete) return;
     const toastId = toast.loading("Clearing dispatch data...");
     try {
-      // මේක යවන්න ඕනේ URL එක:
       const token = localStorage.getItem("token");
       const response = await fetch(`${BACKEND_URL}/api/factory-logs/${recordToDelete._id}?clearDispatchOnly=true`, {
         method: "DELETE",
@@ -152,10 +148,64 @@ export default function DispatchRecordsView() {
     }
   };
 
+  const normalizeTeaType = (type) => {
+    if (!type) return "";
+    return type.toUpperCase().replace(/\s+/g, ""); 
+  };
+
+  const uniqueDispatchTypes = Array.from(
+    new Set(
+      records.flatMap((r) => [
+        ...(r.dispatches || []).map((d) => normalizeTeaType(d.teaType)),
+        ...(r.localSales || []).map((l) => normalizeTeaType(l.teaType)),
+        ...(r.returns || []).map((ret) => normalizeTeaType(ret.teaType)),
+      ]).filter(Boolean)
+    )
+  ).sort();
+
+  // 💡 Filtered Records with Totals Calculation
+  const filteredRecords = records.map((record) => {
+    if (filterDispatchType === "All") {
+      const dispatchQty = Number(record.dispatch) || 0;
+      const localSaleQty = Number(record.localSaleAndGratis) || 0;
+      
+      return {
+        ...record,
+        dispatch: dispatchQty,
+        localSaleAndGratis: localSaleQty,
+        totalOut: dispatchQty + localSaleQty
+      };
+    }
+
+    // 💡 Filter dispatches, local sales, and returns based on selected tea type
+    const filteredDispatches = (record.dispatches || []).filter((d) => normalizeTeaType(d.teaType) === filterDispatchType);
+    const filteredLocalSales = (record.localSales || []).filter((l) => normalizeTeaType(l.teaType) === filterDispatchType);
+    const filteredReturns = (record.returns || []).filter((r) => normalizeTeaType(r.teaType) === filterDispatchType);
+
+    if (filteredDispatches.length === 0 && filteredLocalSales.length === 0 && filteredReturns.length === 0) {
+      return null;
+    }
+
+    const rowDispatchTotal = filteredDispatches.reduce((sum, d) => sum + (Number(d.weight) || 0), 0);
+    const rowLocalSaleTotal = filteredLocalSales.reduce((sum, l) => sum + (Number(l.weight) || 0), 0);
+    const rowReturnTotal = filteredReturns.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+
+    return {
+      ...record,
+      dispatches: filteredDispatches,
+      localSales: filteredLocalSales,
+      returns: filteredReturns,
+      dispatch: rowDispatchTotal,
+      localSaleAndGratis: rowLocalSaleTotal,
+      totalOut: rowDispatchTotal + rowLocalSaleTotal,
+      returnAmount: rowReturnTotal,
+    };
+  }).filter(Boolean);
+
   // Calculations for Summary
-  const totalDispatch = records.reduce((sum, r) => sum + (r.dispatch || 0), 0);
-  const totalLocalSale = records.reduce((sum, r) => sum + (r.localSaleAndGratis || 0), 0);
-  const totalReturns = records.reduce((sum, r) => sum + (r.returnAmount || 0), 0);
+  const totalDispatch = filteredRecords.reduce((sum, r) => sum + (r.dispatch || 0), 0);
+  const totalLocalSale = filteredRecords.reduce((sum, r) => sum + (r.localSaleAndGratis || 0), 0);
+  const totalReturns = filteredRecords.reduce((sum, r) => sum + (r.returnAmount || 0), 0);
   const totalOut = totalDispatch + totalLocalSale;
 
   // Helpers for Array formatting (For PDF & Excel)
@@ -168,7 +218,7 @@ export default function DispatchRecordsView() {
       return num.toFixed(2);
     };
 
-    const tableRows = records.map((r) => [
+    const tableRows = filteredRecords.map((r) => [
       r.date ? r.date.split("T")[0] : "-",
       getArrayInfo(r.dispatches, 'invoiceNo'),
       getArrayInfo(r.dispatches, 'teaType'),
@@ -180,7 +230,7 @@ export default function DispatchRecordsView() {
       formatVal(r.returnAmount || 0),
     ]);
 
-    if (records.length > 0) {
+    if (filteredRecords.length > 0) {
       tableRows.push([
         "TOTAL", "-", "-",
         totalDispatch > 0 ? totalDispatch.toFixed(2) : "-",
@@ -197,7 +247,8 @@ export default function DispatchRecordsView() {
 
   const exportToExcel = () => {
     const periodText = getPeriodText();
-    const dataRows = records.map((r) => [
+    
+    const dataRows = filteredRecords.map((r) => [
       r.date ? r.date.split("T")[0] : "-",
       getArrayInfo(r.dispatches, 'invoiceNo').replace(/\n/g, ", "),
       getArrayInfo(r.dispatches, 'teaType').replace(/\n/g, ", "),
@@ -209,7 +260,7 @@ export default function DispatchRecordsView() {
       Number((r.returnAmount || 0).toFixed(2)),
     ]);
 
-    if (records.length > 0) {
+    if (filteredRecords.length > 0) {
       dataRows.push([
         "TOTAL", "-", "-",
         Number(totalDispatch.toFixed(2)),
@@ -293,7 +344,6 @@ export default function DispatchRecordsView() {
     XLSX.utils.book_append_sheet(workbook, worksheet, "Dispatch Records");
     XLSX.writeFile(workbook, `Dispatch_Report_${periodText.replace(/ /g, "_")}.xlsx`);
   };
-
   return (
     <div className="p-6 md:p-8 max-w-[1400px] mx-auto font-sans flex flex-col min-h-screen bg-[#f3faf7] dark:bg-gray-950 transition-colors duration-300">
       
@@ -314,7 +364,7 @@ export default function DispatchRecordsView() {
             disabled={loading}
             className="px-4 py-2 h-[42px] bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-md text-sm font-semibold flex items-center gap-2 shadow-sm transition-all"
           >
-            <RefreshCcw size={18} className={loading ? "animate-spin" : ""} /> Refresh
+            <RefreshCcw size={18} className={loading ? "animate-spin" : ""} />
           </button>
 
           <button
@@ -406,6 +456,19 @@ export default function DispatchRecordsView() {
                 className="w-full sm:w-40 outline-none text-sm font-medium text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 focus:ring-2 focus:ring-[#1B6A31]/20 transition-all cursor-pointer"
               />
             </div>
+            <div className="flex flex-col gap-1.5 w-full sm:w-auto">
+            <label className="text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Dispatch Type</label>
+            <select
+              value={filterDispatchType}
+              onChange={(e) => setFilterDispatchType(e.target.value)}
+              className="w-full sm:w-40 outline-none text-sm font-medium text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 focus:ring-2 focus:ring-[#1B6A31]/20 transition-all cursor-pointer"
+            >
+              <option value="All">All Types</option>
+              {uniqueDispatchTypes.map((type, idx) => (
+                <option key={idx} value={type}>{type}</option>
+              ))}
+            </select>
+          </div>
           </div>
         </div>
       </div>
@@ -471,9 +534,9 @@ export default function DispatchRecordsView() {
               </thead>
 
               <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                {records.length > 0 ? (
+                {filteredRecords.length > 0 ? (
                   <>
-                    {records.map((record) => {
+                    {filteredRecords.map((record) => {
                       const dispatches = record.dispatches || [];
                       const localSales = record.localSales || [];
                       const returns = record.returns || [];
@@ -549,7 +612,7 @@ export default function DispatchRecordsView() {
 
                         {/* TOTAL OUT */}
                         <td className="px-4 py-4 border-r border-gray-300 dark:border-gray-700 font-black text-gray-800 dark:text-gray-200 bg-gray-100/50 dark:bg-gray-800/50 align-top">
-                          {(record.totalOut || 0).toFixed(2)}
+                          {record.totalOut > 0 ? record.totalOut.toFixed(2) : "-"}
                         </td>
                         
                         {/* RETURN TYPES */}
